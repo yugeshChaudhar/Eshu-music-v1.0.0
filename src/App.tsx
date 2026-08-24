@@ -125,48 +125,78 @@ export function App() {
 
   // 2. Initialize YouTube Iframe Player
   useEffect(() => {
+    let interval: any = null;
+
+    const initYT = () => {
+      if (!(window as any).YT || !(window as any).YT.Player) return;
+      if (ytPlayerRef.current) return;
+
+      try {
+        ytPlayerRef.current = new (window as any).YT.Player('echo-youtube-engine', {
+          height: '180',
+          width: '320',
+          videoId: currentTrack?.id || 'fJ9rUzIMcZQ',
+          playerVars: {
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1,
+            origin: window.location.origin,
+          },
+          events: {
+            onReady: (event: any) => {
+              event.target.setVolume(volume);
+            },
+            onStateChange: (event: any) => {
+              // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING, 0 = ENDED
+              if (event.data === 1) {
+                setIsPlaying(true);
+                setIsBuffering(false);
+                setDuration(event.target.getDuration() || currentTrack?.duration || 200);
+              } else if (event.data === 2) {
+                setIsPlaying(false);
+                setIsBuffering(false);
+              } else if (event.data === 3) {
+                setIsBuffering(true);
+              } else if (event.data === 0) {
+                handleTrackEnd();
+              }
+            },
+            onError: (err: any) => {
+              console.warn('YouTube Player Engine Error:', err);
+              // Auto-advance if error occurs
+              setTimeout(() => {
+                handleNextTrack();
+              }, 1200);
+            },
+          },
+        });
+      } catch (e) {
+        console.warn('Error instantiating YT Player:', e);
+      }
+    };
+
     if (!(window as any).YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       const firstScriptTag = document.getElementsByTagName('script')[0];
       firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+      (window as any).onYouTubeIframeAPIReady = initYT;
+    } else {
+      initYT();
     }
 
-    (window as any).onYouTubeIframeAPIReady = () => {
-      ytPlayerRef.current = new (window as any).YT.Player('echo-youtube-engine', {
-        height: '1',
-        width: '1',
-        videoId: currentTrack?.id || 'fJ9rUzIMcZQ',
-        playerVars: {
-          autoplay: 0,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          rel: 0,
-          modestbranding: 1,
-          origin: window.location.origin,
-        },
-        events: {
-          onReady: (event: any) => {
-            event.target.setVolume(volume);
-          },
-          onStateChange: (event: any) => {
-            // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING, 0 = ENDED
-            if (event.data === 1) {
-              setIsPlaying(true);
-              setIsBuffering(false);
-              setDuration(event.target.getDuration() || currentTrack?.duration || 200);
-            } else if (event.data === 2) {
-              setIsPlaying(false);
-              setIsBuffering(false);
-            } else if (event.data === 3) {
-              setIsBuffering(true);
-            } else if (event.data === 0) {
-              handleTrackEnd();
-            }
-          },
-        },
-      });
+    interval = setInterval(() => {
+      if ((window as any).YT && (window as any).YT.Player && !ytPlayerRef.current) {
+        initYT();
+      }
+    }, 500);
+
+    return () => {
+      if (interval) clearInterval(interval);
     };
   }, []);
 
@@ -220,22 +250,63 @@ export function App() {
   }, [currentTrack?.id]);
 
   // 5. Playback Handlers
-  const handlePlayTrack = (track: Track, newQueue?: Track[]) => {
+  const handlePlayTrack = async (track: Track, newQueue?: Track[]) => {
     setCurrentTrack(track);
     setCurrentTime(0);
     setDuration(track.duration || 200);
 
-    if (newQueue) {
+    if (newQueue && newQueue.length > 0) {
       setPlayQueue(newQueue);
       const idx = newQueue.findIndex((t) => t.id === track.id);
       setQueueIndex(idx >= 0 ? idx : 0);
     }
 
+    let actualVideoId = track.id;
+
+    // If ID is a fallback itunes id, query YouTube API to get the real videoId
+    if (actualVideoId.startsWith('itunes_')) {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(track.artist + ' ' + track.title)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.results && data.results[0] && !data.results[0].id.startsWith('itunes_')) {
+            actualVideoId = data.results[0].id;
+          }
+        }
+      } catch {}
+    }
+
     if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
-      ytPlayerRef.current.loadVideoById(track.id);
-      ytPlayerRef.current.playVideo();
+      try {
+        ytPlayerRef.current.loadVideoById({
+          videoId: actualVideoId,
+          suggestedQuality: 'small',
+        });
+        ytPlayerRef.current.playVideo();
+      } catch (err) {
+        console.warn('Error loading video by ID:', err);
+      }
     }
     setIsPlaying(true);
+
+    // Sync browser MediaSession for notifications and keyboard media keys
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: track.title,
+          artist: track.artist,
+          album: track.album || 'Eshu Music',
+          artwork: [
+            { src: track.thumbnail || `https://img.youtube.com/vi/${actualVideoId}/hqdefault.jpg`, sizes: '512x512', type: 'image/jpeg' },
+          ],
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => handleTogglePlay());
+        navigator.mediaSession.setActionHandler('pause', () => handleTogglePlay());
+        navigator.mediaSession.setActionHandler('nexttrack', () => handleNextTrack());
+        navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevTrack());
+      } catch {}
+    }
   };
 
   const handleTogglePlay = () => {
@@ -337,7 +408,9 @@ export function App() {
       settings.theme === 'amoled-noir' ? 'bg-black' : 'bg-neutral-950'
     }`}>
       {/* Hidden YouTube Engine */}
-      <div id="echo-youtube-engine" className="hidden pointer-events-none" />
+      <div className="fixed -bottom-96 -right-96 w-48 h-32 opacity-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
+        <div id="echo-youtube-engine" />
+      </div>
 
       {/* Top Header */}
       <EchoHeader
