@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Track, Playlist, Artist } from '../../types';
 import { ECHO_QUICK_PICKS, ECHO_TOP_ARTISTS, COUNTRY_CHARTS } from '../../data/echoMusicData';
+import { universalSearch, fetchLiveSearchSuggestions, extractYouTubeInfo } from '../../services/universalSearchService';
 
 interface SearchScreenProps {
   currentTrack: Track | null;
@@ -80,19 +81,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   ];
   const uniqueStaticTracks = Array.from(new Map(allStaticTracks.map((t) => [t.id, t])).values());
 
-  // Detect YouTube Link in query
-  const checkIsYouTubeLink = (text: string) => {
-    const trimmed = text.trim();
-    return (
-      trimmed.includes('youtube.com/watch') ||
-      trimmed.includes('youtu.be/') ||
-      trimmed.includes('music.youtube.com') ||
-      trimmed.includes('youtube.com/shorts') ||
-      /^[a-zA-Z0-9_-]{11}$/.test(trimmed)
-    );
-  };
-
-  // Perform Live Backend Search
+  // Perform Live Universal Search (Vercel, Node, and Invidious compatible)
   const executeSearch = async (searchTerm: string) => {
     const trimmed = searchTerm.trim();
     if (!trimmed) {
@@ -108,46 +97,19 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     setHasSearched(true);
 
     try {
-      const isYT = checkIsYouTubeLink(trimmed);
+      const response = await universalSearch(trimmed);
+      setLiveResults(response.results);
 
-      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results && Array.isArray(data.results)) {
-          const formattedTracks: Track[] = data.results.map((item: any) => ({
-            id: item.id,
-            title: item.title,
-            artist: item.artist || 'YouTube Artist',
-            album: item.album,
-            duration: item.duration || 210,
-            thumbnail: item.thumbnail || `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
-            views: item.views,
-            videoUrl: item.videoUrl || `https://www.youtube.com/watch?v=${item.id}`,
-          }));
-
-          setLiveResults(formattedTracks);
-
-          if (data.isDirectLink || isYT) {
-            setIsDirectLink(true);
-            setDirectLinkTrack(formattedTracks[0] || null);
-          } else {
-            setIsDirectLink(false);
-            setDirectLinkTrack(null);
-          }
-        } else {
-          setLiveResults([]);
-        }
+      if (response.isDirectLink || response.directTrack) {
+        setIsDirectLink(true);
+        setDirectLinkTrack(response.directTrack || response.results[0] || null);
       } else {
-        // Fallback to local filtering
-        const filtered = uniqueStaticTracks.filter(
-          (t) =>
-            t.title.toLowerCase().includes(trimmed.toLowerCase()) ||
-            t.artist.toLowerCase().includes(trimmed.toLowerCase())
-        );
-        setLiveResults(filtered);
+        setIsDirectLink(false);
+        setDirectLinkTrack(null);
       }
     } catch (err) {
-      console.warn('Live search error, using local fallback:', err);
+      console.warn('Search error:', err);
+      // Local fallback
       const filtered = uniqueStaticTracks.filter(
         (t) =>
           t.title.toLowerCase().includes(trimmed.toLowerCase()) ||
@@ -166,12 +128,11 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       return;
     }
     try {
-      const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(term)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSuggestions(data.suggestions?.slice(0, 5) || []);
-      }
-    } catch {}
+      const sugs = await fetchLiveSearchSuggestions(term);
+      setSuggestions(sugs);
+    } catch {
+      setSuggestions([]);
+    }
   };
 
   // Handle Input Changes with Debounce
@@ -194,7 +155,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     }
 
     // Check if user pasted a direct link -> search immediately!
-    if (checkIsYouTubeLink(val)) {
+    const yt = extractYouTubeInfo(val);
+    if (yt.videoId || yt.playlistId) {
       executeSearch(val);
       return;
     }

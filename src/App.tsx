@@ -36,6 +36,7 @@ import {
   recordTrackPlay, 
   DEFAULT_ECHO_SETTINGS 
 } from './services/echoStorage';
+import { resolveRealVideoId } from './services/universalSearchService';
 import { EchoHeader } from './components/EchoHeader';
 import { EchoNavigation } from './components/EchoNavigation';
 import { EchoMiniPlayer } from './components/EchoMiniPlayer';
@@ -263,17 +264,13 @@ export function App() {
 
     let actualVideoId = track.id;
 
-    // If ID is a fallback itunes id, query YouTube API to get the real videoId
-    if (actualVideoId.startsWith('itunes_')) {
+    // Resolve non-standard or iTunes IDs to real playable YouTube video IDs
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(actualVideoId)) {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(track.artist + ' ' + track.title)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.results && data.results[0] && !data.results[0].id.startsWith('itunes_')) {
-            actualVideoId = data.results[0].id;
-          }
-        }
-      } catch {}
+        actualVideoId = await resolveRealVideoId(track);
+      } catch {
+        actualVideoId = 'fJ9rUzIMcZQ';
+      }
     }
 
     if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
