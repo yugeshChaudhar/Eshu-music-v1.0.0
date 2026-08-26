@@ -37,8 +37,10 @@ export const PlaylistScreen: React.FC<PlaylistScreenProps> = ({
   isFavorite,
   onAddToQueue,
 }) => {
+  const playlistTracks = Array.isArray(playlist?.tracks) ? playlist.tracks : [];
+
   const formatTotalTime = (tracks: Track[]) => {
-    const totalSecs = tracks.reduce((acc, t) => acc + (t.duration || 180), 0);
+    const totalSecs = (tracks || []).reduce((acc, t) => acc + (t.duration || 180), 0);
     const mins = Math.floor(totalSecs / 60);
     const hrs = Math.floor(mins / 60);
     if (hrs > 0) return `${hrs} hr ${mins % 60} min`;
@@ -66,7 +68,7 @@ export const PlaylistScreen: React.FC<PlaylistScreenProps> = ({
       {/* Playlist Hero */}
       <div className="rounded-3xl overflow-hidden bg-gradient-to-b from-neutral-900 via-neutral-900/90 to-neutral-950 border border-white/10 p-6 sm:p-8 flex flex-col sm:flex-row items-center sm:items-end gap-6 shadow-2xl">
         <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-2xl overflow-hidden bg-neutral-800 shrink-0 shadow-2xl border border-white/10">
-          {playlist.thumbnail ? (
+          {playlist?.thumbnail ? (
             <img src={playlist.thumbnail} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-neutral-600">
@@ -80,22 +82,22 @@ export const PlaylistScreen: React.FC<PlaylistScreenProps> = ({
             Playlist
           </span>
           <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight mt-1">
-            {playlist.title}
+            {playlist?.title || 'Untitled Playlist'}
           </h1>
-          {playlist.description && (
+          {playlist?.description && (
             <p className="text-xs sm:text-sm text-neutral-400 mt-1 max-w-xl">
               {playlist.description}
             </p>
           )}
 
           <p className="text-xs text-neutral-300 font-medium mt-2">
-            Created by <span className="text-white font-bold">{playlist.author || 'You'}</span> • {playlist.tracks.length} Songs, {formatTotalTime(playlist.tracks)}
+            Created by <span className="text-white font-bold">{playlist?.author || 'You'}</span> • {playlistTracks.length} Songs, {formatTotalTime(playlistTracks)}
           </p>
 
           <div className="flex items-center justify-center sm:justify-start gap-3 mt-5">
             <button
               onClick={onPlayAll}
-              disabled={playlist.tracks.length === 0}
+              disabled={playlistTracks.length === 0}
               className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#8ECAE6] hover:bg-[#72b8d8] text-black font-bold text-sm shadow-xl shadow-[#8ECAE6]/20 transition-transform active:scale-95 disabled:opacity-50"
             >
               <Play className="w-4 h-4 fill-black" />
@@ -104,7 +106,7 @@ export const PlaylistScreen: React.FC<PlaylistScreenProps> = ({
 
             <button
               onClick={onShuffleAll}
-              disabled={playlist.tracks.length === 0}
+              disabled={playlistTracks.length === 0}
               className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-50"
               title="Shuffle"
             >
@@ -124,19 +126,19 @@ export const PlaylistScreen: React.FC<PlaylistScreenProps> = ({
           </span>
         </div>
 
-        {playlist.tracks.length === 0 ? (
+        {playlistTracks.length === 0 ? (
           <div className="py-16 text-center text-neutral-500 border border-dashed border-white/10 rounded-2xl">
             <Music2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
             <p className="text-sm">This playlist has no songs yet.</p>
             <p className="text-xs text-neutral-400 mt-1">Use Search to find songs and add them here!</p>
           </div>
         ) : (
-          playlist.tracks.map((track, idx) => {
+          playlistTracks.map((track, idx) => {
             const isCurrent = track.id === currentPlayingTrackId;
             return (
               <div
                 key={`${track.id}-${idx}`}
-                onClick={() => onPlayTrack(track, playlist.tracks)}
+                onClick={() => onPlayTrack(track, playlistTracks)}
                 className={`group flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
                   isCurrent
                     ? 'bg-[#8ECAE6]/15 border-[#8ECAE6]/40 shadow-md'

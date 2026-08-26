@@ -1,4 +1,5 @@
 import { Track, Playlist, SimpSettings, UserStats } from '../types';
+import { safeJsonStringify, sanitizeTrack, sanitizePlaylist, isDomOrEvent } from './echoStorage';
 
 const STORAGE_KEYS = {
   FAVORITES: 'simpmusic_favorites_v1',
@@ -65,7 +66,9 @@ export function isTrackFavorite(trackId: string): boolean {
   return favs.some((t) => t.id === trackId);
 }
 
-export function toggleTrackFavorite(track: Track): boolean {
+export function toggleTrackFavorite(trackInput: Track): boolean {
+  if (!trackInput || isDomOrEvent(trackInput)) return false;
+  const track = sanitizeTrack(trackInput);
   const favs = getFavoriteTracks();
   const index = favs.findIndex((t) => t.id === track.id);
   let isNowFav = false;
@@ -76,7 +79,7 @@ export function toggleTrackFavorite(track: Track): boolean {
     favs.unshift({ ...track, addedAt: Date.now() });
     isNowFav = true;
   }
-  localStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(favs));
+  localStorage.setItem(STORAGE_KEYS.FAVORITES, safeJsonStringify(favs, '[]'));
   return isNowFav;
 }
 
@@ -84,13 +87,17 @@ export function toggleTrackFavorite(track: Track): boolean {
 export function getCustomPlaylists(): Playlist[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PLAYLISTS);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((p: any) => p && !isDomOrEvent(p)).map(sanitizePlaylist) : [];
   } catch {
     return [];
   }
 }
 
-export function saveCustomPlaylist(playlist: Playlist): void {
+export function saveCustomPlaylist(playlistInput: Playlist): void {
+  if (!playlistInput || isDomOrEvent(playlistInput)) return;
+  const playlist = sanitizePlaylist(playlistInput);
   const playlists = getCustomPlaylists();
   const existingIdx = playlists.findIndex((p) => p.id === playlist.id);
   if (existingIdx >= 0) {
@@ -98,15 +105,17 @@ export function saveCustomPlaylist(playlist: Playlist): void {
   } else {
     playlists.unshift(playlist);
   }
-  localStorage.setItem(STORAGE_KEYS.PLAYLISTS, JSON.stringify(playlists));
+  localStorage.setItem(STORAGE_KEYS.PLAYLISTS, safeJsonStringify(playlists, '[]'));
 }
 
 export function deleteCustomPlaylist(playlistId: string): void {
   const playlists = getCustomPlaylists().filter((p) => p.id !== playlistId);
-  localStorage.setItem(STORAGE_KEYS.PLAYLISTS, JSON.stringify(playlists));
+  localStorage.setItem(STORAGE_KEYS.PLAYLISTS, safeJsonStringify(playlists, '[]'));
 }
 
-export function addTrackToPlaylist(playlistId: string, track: Track): void {
+export function addTrackToPlaylist(playlistId: string, trackInput: Track): void {
+  if (!trackInput || isDomOrEvent(trackInput)) return;
+  const track = sanitizeTrack(trackInput);
   const playlists = getCustomPlaylists();
   const target = playlists.find((p) => p.id === playlistId);
   if (target) {
@@ -116,21 +125,23 @@ export function addTrackToPlaylist(playlistId: string, track: Track): void {
       if (!target.thumbnail && track.thumbnail) {
         target.thumbnail = track.thumbnail;
       }
-      localStorage.setItem(STORAGE_KEYS.PLAYLISTS, JSON.stringify(playlists));
+      localStorage.setItem(STORAGE_KEYS.PLAYLISTS, safeJsonStringify(playlists, '[]'));
     }
   }
 }
 
 // 3. User Listening Stats & History
-export function recordTrackPlay(track: Track, listenedSeconds: number = 30): void {
+export function recordTrackPlay(trackInput: Track, listenedSeconds: number = 30): void {
   try {
+    if (!trackInput || isDomOrEvent(trackInput)) return;
+    const track = sanitizeTrack(trackInput);
     // 1. History
     const rawHistory = localStorage.getItem(STORAGE_KEYS.HISTORY);
     let history: { track: Track; timestamp: number }[] = rawHistory ? JSON.parse(rawHistory) : [];
-    history = history.filter((h) => h.track.id !== track.id);
+    history = history.filter((h) => h.track && h.track.id !== track.id);
     history.unshift({ track, timestamp: Date.now() });
     if (history.length > 50) history = history.slice(0, 50);
-    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+    localStorage.setItem(STORAGE_KEYS.HISTORY, safeJsonStringify(history, '[]'));
 
     // 2. Stats
     const rawStats = localStorage.getItem(STORAGE_KEYS.STATS);
@@ -166,7 +177,7 @@ export function recordTrackPlay(track: Track, listenedSeconds: number = 30): voi
     stats.topArtists.sort((a, b) => b.playCount - a.playCount);
 
     stats.recentPlays = history.slice(0, 20);
-    localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+    localStorage.setItem(STORAGE_KEYS.STATS, safeJsonStringify(stats, '{}'));
   } catch (e) {
     console.warn('Failed to record track play:', e);
   }
@@ -206,6 +217,7 @@ export function getFollowedArtists(): string[] {
 }
 
 export function toggleFollowArtist(artistName: string): boolean {
+  if (typeof artistName !== 'string' || !artistName.trim()) return false;
   const list = getFollowedArtists();
   const idx = list.indexOf(artistName);
   let isFollowing = false;
@@ -216,7 +228,7 @@ export function toggleFollowArtist(artistName: string): boolean {
     list.push(artistName);
     isFollowing = true;
   }
-  localStorage.setItem(STORAGE_KEYS.FOLLOWED_ARTISTS, JSON.stringify(list));
+  localStorage.setItem(STORAGE_KEYS.FOLLOWED_ARTISTS, safeJsonStringify(list, '[]'));
   return isFollowing;
 }
 
@@ -230,5 +242,5 @@ export function getSavedSettings(): SimpSettings {
 }
 
 export function saveSettings(settings: SimpSettings): void {
-  localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  localStorage.setItem(STORAGE_KEYS.SETTINGS, safeJsonStringify(settings, '{}'));
 }

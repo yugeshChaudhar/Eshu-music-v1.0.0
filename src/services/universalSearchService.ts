@@ -167,14 +167,12 @@ async function searchITunesAPI(query: string): Promise<Track[]> {
  */
 function searchStaticCatalog(query: string): Track[] {
   const q = query.toLowerCase().trim();
+  const allChartTracks = Object.values(COUNTRY_CHARTS || {}).flatMap(
+    (c) => (c && Array.isArray(c.tracks) ? c.tracks : [])
+  );
   const allStatic: Track[] = [
-    ...ECHO_QUICK_PICKS,
-    ...COUNTRY_CHARTS.GLOBAL.tracks,
-    ...COUNTRY_CHARTS.IN.tracks,
-    ...COUNTRY_CHARTS.US.tracks,
-    ...COUNTRY_CHARTS.UK.tracks,
-    ...COUNTRY_CHARTS.KR.tracks,
-    ...COUNTRY_CHARTS.JP.tracks,
+    ...(Array.isArray(ECHO_QUICK_PICKS) ? ECHO_QUICK_PICKS : []),
+    ...allChartTracks,
   ];
 
   const unique = Array.from(new Map(allStatic.map((t) => [t.id, t])).values());

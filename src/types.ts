@@ -14,7 +14,7 @@ export type ThemeMode =
   | 'cyber-noir'
   | 'dynamic-glow';
 
-export type PlayerViewMode = 'artwork' | 'canvas' | 'vinyl' | 'lyrics' | 'video';
+export type PlayerViewMode = 'artwork' | 'canvas' | 'visualizer' | 'vinyl' | 'lyrics' | 'video';
 
 export interface Track {
   id: string; // YouTube videoId or unique ID

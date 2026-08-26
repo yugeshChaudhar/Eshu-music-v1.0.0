@@ -1,3 +1,5 @@
+import { safeJsonStringify } from './echoStorage';
+
 export interface SavedSessionState {
   stationId?: string;
   isOfflineMode: boolean;
@@ -29,7 +31,7 @@ export function saveSessionState(state: Partial<SavedSessionState>): void {
       ...state,
       timestamp: Date.now(),
     } as SavedSessionState;
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(SESSION_STORAGE_KEY, safeJsonStringify(updated, '{}'));
   } catch (err) {
     console.warn('Failed to save playback session state:', err);
   }

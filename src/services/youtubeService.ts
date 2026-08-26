@@ -1,4 +1,5 @@
 import { CustomPlaylist } from '../types';
+import { safeJsonStringify } from './echoStorage';
 
 const STORAGE_KEY_PLAYLISTS = 'casual_radio_custom_playlists';
 const STORAGE_KEY_FAVORITES = 'casual_radio_favorites';
@@ -247,7 +248,7 @@ export function updateCustomPlaylistCover(id: string, coverUrl: string): void {
   });
   if (changed) {
     try {
-      localStorage.setItem(STORAGE_KEY_PLAYLISTS, JSON.stringify(updated));
+      localStorage.setItem(STORAGE_KEY_PLAYLISTS, safeJsonStringify(updated, '[]'));
     } catch {}
   }
 }
@@ -273,7 +274,7 @@ export function saveCustomPlaylist(playlist: Omit<CustomPlaylist, 'id' | 'create
 
   const updated = [newPlaylist, ...playlists];
   try {
-    localStorage.setItem(STORAGE_KEY_PLAYLISTS, JSON.stringify(updated));
+    localStorage.setItem(STORAGE_KEY_PLAYLISTS, safeJsonStringify(updated, '[]'));
   } catch {}
   return newPlaylist;
 }
@@ -282,7 +283,7 @@ export function deleteCustomPlaylist(id: string): void {
   const playlists = getSavedPlaylists();
   const updated = playlists.filter(p => p.id !== id);
   try {
-    localStorage.setItem(STORAGE_KEY_PLAYLISTS, JSON.stringify(updated));
+    localStorage.setItem(STORAGE_KEY_PLAYLISTS, safeJsonStringify(updated, '[]'));
   } catch {}
 }
 
@@ -301,7 +302,7 @@ export function toggleFavorite(stationOrTrackId: string): boolean {
   const isFav = favs.includes(stationOrTrackId);
   const updated = isFav ? favs.filter(id => id !== stationOrTrackId) : [...favs, stationOrTrackId];
   try {
-    localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(updated));
+    localStorage.setItem(STORAGE_KEY_FAVORITES, safeJsonStringify(updated, '[]'));
   } catch {}
   return !isFav;
 }

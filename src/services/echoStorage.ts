@@ -46,14 +46,51 @@ export const DEFAULT_ECHO_SETTINGS: EchoSettings = {
 };
 
 // 1. Liked Songs / Favorites
+export function isDomOrEvent(obj: any): boolean {
+  if (!obj || typeof obj !== 'object') return false;
+  if (typeof Node !== 'undefined' && obj instanceof Node) return true;
+  if (typeof Element !== 'undefined' && obj instanceof Element) return true;
+  if (typeof Event !== 'undefined' && obj instanceof Event) return true;
+  if ('nodeType' in obj || 'target' in obj || 'nativeEvent' in obj || '_reactName' in obj || 'stateNode' in obj) return true;
+  return false;
+}
+
+export function safeJsonStringify(value: any, fallback: string = '[]'): string {
+  try {
+    const seen = new WeakSet();
+    return JSON.stringify(value, (key, val) => {
+      if (typeof val === 'object' && val !== null) {
+        if (
+          (typeof Node !== 'undefined' && val instanceof Node) ||
+          (typeof Element !== 'undefined' && val instanceof Element) ||
+          'nodeType' in val ||
+          '_reactName' in val ||
+          'stateNode' in val ||
+          key.startsWith('__react')
+        ) {
+          return undefined;
+        }
+        if (seen.has(val)) {
+          return undefined;
+        }
+        seen.add(val);
+      }
+      return val;
+    });
+  } catch (err) {
+    console.warn('safeJsonStringify encountered error, falling back:', err);
+    return fallback;
+  }
+}
+
 export function sanitizeTrack(track: any): Track {
-  if (!track || typeof track !== 'object' || !track.id) {
+  if (!track || typeof track !== 'object' || isDomOrEvent(track) || !track.id || typeof track.id !== 'string') {
     return {
-      id: `track-${Date.now()}`,
-      title: 'Unknown Track',
-      artist: 'Unknown Artist',
-      duration: 180,
-      thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
+      id: typeof track?.id === 'string' && track.id.trim() ? track.id.trim() : `track-${Date.now()}`,
+      title: typeof track?.title === 'string' && track.title.trim() ? track.title.trim() : 'Unknown Track',
+      artist: typeof track?.artist === 'string' && track.artist.trim() ? track.artist.trim() : 'Unknown Artist',
+      duration: typeof track?.duration === 'number' && !isNaN(track.duration) && track.duration > 0 ? track.duration : 180,
+      thumbnail: typeof track?.thumbnail === 'string' && track.thumbnail.trim() ? track.thumbnail.trim() : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
     };
   }
   return {
@@ -71,7 +108,7 @@ export function sanitizeTrack(track: any): Track {
 }
 
 export function sanitizePlaylist(pl: any): Playlist {
-  if (!pl || typeof pl !== 'object') {
+  if (!pl || typeof pl !== 'object' || isDomOrEvent(pl)) {
     return {
       id: `pl-${Date.now()}`,
       title: 'New Playlist',
@@ -81,7 +118,7 @@ export function sanitizePlaylist(pl: any): Playlist {
     };
   }
   const rawTracks = Array.isArray(pl.tracks) ? pl.tracks : [];
-  const cleanTracks = rawTracks.map(sanitizeTrack);
+  const cleanTracks = rawTracks.filter((t: any) => t && !isDomOrEvent(t)).map(sanitizeTrack);
   return {
     id: String(pl.id || `pl-${Date.now()}`),
     title: String(pl.title || 'Untitled Playlist'),
@@ -99,7 +136,7 @@ export function getFavoriteTracks(): Track[] {
     const raw = localStorage.getItem(FAVORITES_KEY) || localStorage.getItem('simpmusic_favorites_v1');
     if (!raw) return [];
     const list = JSON.parse(raw);
-    return Array.isArray(list) ? list.map(sanitizeTrack) : [];
+    return Array.isArray(list) ? list.filter((t: any) => t && !isDomOrEvent(t)).map(sanitizeTrack) : [];
   } catch (e) {
     console.error('Failed to get favorites', e);
     return [];
@@ -112,6 +149,7 @@ export function isTrackFavorite(trackId: string): boolean {
 }
 
 export function toggleTrackFavorite(trackInput: Track): boolean {
+  if (!trackInput || isDomOrEvent(trackInput)) return false;
   const track = sanitizeTrack(trackInput);
   const current = getFavoriteTracks();
   const exists = current.some((t) => t.id === track.id);
@@ -123,7 +161,7 @@ export function toggleTrackFavorite(trackInput: Track): boolean {
     updated = [{ ...track, addedAt: Date.now() }, ...current];
   }
 
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(updated));
+  localStorage.setItem(FAVORITES_KEY, safeJsonStringify(updated, '[]'));
   return !exists;
 }
 
@@ -153,18 +191,19 @@ export function saveCustomPlaylist(playlistInput: Playlist): Playlist[] {
     updated = [playlist, ...current];
   }
 
-  localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(updated));
+  localStorage.setItem(PLAYLISTS_KEY, safeJsonStringify(updated, '[]'));
   return updated;
 }
 
 export function deleteCustomPlaylist(playlistId: string): Playlist[] {
   const current = getCustomPlaylists();
   const updated = current.filter((p) => p.id !== playlistId);
-  localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(updated));
+  localStorage.setItem(PLAYLISTS_KEY, safeJsonStringify(updated, '[]'));
   return updated;
 }
 
 export function addTrackToPlaylist(playlistId: string, trackInput: Track): { success: boolean; playlists: Playlist[] } {
+  if (!trackInput || isDomOrEvent(trackInput)) return { success: false, playlists: getCustomPlaylists() };
   const track = sanitizeTrack(trackInput);
   const current = getCustomPlaylists();
   const playlistIndex = current.findIndex((p) => p.id === playlistId);
@@ -217,6 +256,7 @@ export function getUserStats(): UserStats {
 
 export function recordTrackPlay(trackInput: Track, listenedSeconds: number = 30): void {
   try {
+    if (!trackInput || isDomOrEvent(trackInput)) return;
     const track = sanitizeTrack(trackInput);
     const stats = getUserStats();
     stats.totalListeningSeconds += listenedSeconds;
@@ -246,14 +286,14 @@ export function recordTrackPlay(trackInput: Track, listenedSeconds: number = 30)
     stats.topArtists.sort((a, b) => b.playCount - a.playCount);
     stats.topArtists = stats.topArtists.slice(0, 8);
 
-    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+    localStorage.setItem(STATS_KEY, safeJsonStringify(stats, '{}'));
 
     // Update History
     const history = getListeningHistory();
     const newEntry = { track, timestamp: Date.now() };
     const filtered = history.filter((h) => h.track.id !== track.id);
     const updatedHistory = [newEntry, ...filtered].slice(0, 50);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(updatedHistory));
+    localStorage.setItem(HISTORY_KEY, safeJsonStringify(updatedHistory, '[]'));
   } catch (e) {
     console.error('Failed to record track play', e);
   }
@@ -280,13 +320,15 @@ export function getFollowedArtists(): string[] {
   try {
     const raw = localStorage.getItem(ARTISTS_KEY) || localStorage.getItem('simpmusic_artists_v1');
     if (!raw) return ['The Weeknd', 'Queen'];
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((a) => typeof a === 'string') : ['The Weeknd'];
   } catch (e) {
     return ['The Weeknd'];
   }
 }
 
 export function toggleFollowArtist(artistName: string): boolean {
+  if (typeof artistName !== 'string' || !artistName.trim()) return false;
   const current = getFollowedArtists();
   const exists = current.includes(artistName);
   let updated: string[];
@@ -295,7 +337,7 @@ export function toggleFollowArtist(artistName: string): boolean {
   } else {
     updated = [...current, artistName];
   }
-  localStorage.setItem(ARTISTS_KEY, JSON.stringify(updated));
+  localStorage.setItem(ARTISTS_KEY, safeJsonStringify(updated, '[]'));
   return !exists;
 }
 
@@ -311,7 +353,7 @@ export function getSavedSettings(): EchoSettings {
 }
 
 export function saveSettings(settings: EchoSettings): void {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  localStorage.setItem(SETTINGS_KEY, safeJsonStringify(settings, '{}'));
 }
 
 // 6. Backup & Restore (Echo Music Migration compatibility)
@@ -326,7 +368,7 @@ export function exportEchoBackup(): string {
     settings: getSavedSettings(),
     stats: getUserStats(),
   };
-  return JSON.stringify(backup, null, 2);
+  return safeJsonStringify(backup, '{}');
 }
 
 export function importEchoBackup(jsonString: string): { success: boolean; message: string; count: number } {
@@ -335,17 +377,20 @@ export function importEchoBackup(jsonString: string): { success: boolean; messag
     let count = 0;
 
     if (Array.isArray(parsed.favorites)) {
-      localStorage.setItem(FAVORITES_KEY, JSON.stringify(parsed.favorites));
-      count += parsed.favorites.length;
+      const cleanFavs = parsed.favorites.filter((t: any) => t && !isDomOrEvent(t)).map(sanitizeTrack);
+      localStorage.setItem(FAVORITES_KEY, safeJsonStringify(cleanFavs, '[]'));
+      count += cleanFavs.length;
     }
 
     if (Array.isArray(parsed.playlists)) {
-      localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(parsed.playlists));
-      count += parsed.playlists.length;
+      const cleanPlaylists = parsed.playlists.filter((p: any) => p && !isDomOrEvent(p)).map(sanitizePlaylist);
+      localStorage.setItem(PLAYLISTS_KEY, safeJsonStringify(cleanPlaylists, '[]'));
+      count += cleanPlaylists.length;
     }
 
     if (Array.isArray(parsed.followedArtists)) {
-      localStorage.setItem(ARTISTS_KEY, JSON.stringify(parsed.followedArtists));
+      const cleanArtists = parsed.followedArtists.filter((a: any) => typeof a === 'string');
+      localStorage.setItem(ARTISTS_KEY, safeJsonStringify(cleanArtists, '[]'));
     }
 
     if (parsed.settings && typeof parsed.settings === 'object') {

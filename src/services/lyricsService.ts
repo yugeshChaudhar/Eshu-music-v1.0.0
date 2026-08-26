@@ -4,7 +4,7 @@ import { SAMPLE_SYNCED_LYRICS } from '../data/simpMusicData';
 
 // Multi-tier client cache
 const MEMORY_CACHE = new Map<string, LyricsData>();
-const LOCAL_STORAGE_KEY = 'eshu_lyrics_cache_v2';
+const LOCAL_STORAGE_KEY = 'eshu_lyrics_cache_v3';
 
 function getStorageCache(): Record<string, LyricsData> {
   try {
@@ -18,9 +18,9 @@ function getStorageCache(): Record<string, LyricsData> {
 function setStorageCache(key: string, data: LyricsData) {
   try {
     const existing = getStorageCache();
-    // Keep max 100 entries in localStorage to avoid storage limits
+    // Keep max 150 entries in localStorage to avoid storage limits
     const keys = Object.keys(existing);
-    if (keys.length > 100) {
+    if (keys.length > 150) {
       delete existing[keys[0]];
     }
     existing[key] = data;
@@ -30,11 +30,7 @@ function setStorageCache(key: string, data: LyricsData) {
   }
 }
 
-export function clearLyricsCacheForTrack(title: string, artist?: string) {
-  const normTitle = title.toLowerCase().trim();
-  const normArtist = (artist || '').toLowerCase().trim();
-  const key = `${normTitle}_${normArtist}`;
-  MEMORY_CACHE.delete(key);
+function removeStorageCache(key: string) {
   try {
     const existing = getStorageCache();
     delete existing[key];
@@ -45,24 +41,42 @@ export function clearLyricsCacheForTrack(title: string, artist?: string) {
 }
 
 /**
- * Normalizes string for fuzzy title/artist matching
+ * Normalizes title / artist for client-side cache and query preparation.
+ * Preserves Nepali & Hindi Devanagari Unicode (\u0900-\u097F).
  */
 export function cleanTrackTitle(raw: string): string {
   if (!raw) return '';
   return raw
-    .replace(/(\(|\[)(official\s*(music\s*)?(video|audio|lyrics|hd|4k|remastered|lyric\s*video|visualizer)|remastered\s*\d*).*?(\)|\])/gi, '')
+    .replace(/(\(|\[)(official\s*(music\s*)?(video|audio|lyrics|hd|4k|remastered|lyric\s*video|visualizer)|remastered\s*\d*|full\s*audio|new\s*nepali\s*song\s*\d*).*?(\)|\])/gi, '')
     .replace(/\s*-\s*(official\s*(music\s*)?(video|audio|lyrics)|visualizer)/gi, '')
     .replace(/\s+(ft\.|feat\.|featuring)\s+.*/gi, '')
+    .replace(/\s*-\s*Topic$/i, '')
+    .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
+export function clearLyricsCacheForTrack(title: string, artist?: string, videoId?: string) {
+  const normTitle = cleanTrackTitle(title).toLowerCase().trim();
+  const normArtist = cleanTrackTitle(artist || '').toLowerCase().trim();
+  const metaKey = `meta_${normTitle}_${normArtist}`;
+
+  MEMORY_CACHE.delete(metaKey);
+  removeStorageCache(metaKey);
+
+  if (videoId) {
+    const vidKey = `vid_${videoId}`;
+    MEMORY_CACHE.delete(vidKey);
+    removeStorageCache(vidKey);
+  }
+}
+
 /**
- * Fetches lyrics for a track with multi-source fallback:
- * 1. Client in-memory & localStorage cache
- * 2. ESHU Database (includes custom user/admin entries & built-in Nepali/Global hits)
- * 3. LRCLIB (exact match & search)
- * 4. Gemini AI server-side synchronized LRC generator
- * 5. Clean unavailable state with "Add Lyrics" prompt
+ * Fetches lyrics for the currently playing track:
+ * 1. Checks memory & localStorage client cache by YouTube videoId or normalized Title + Artist.
+ * 2. Checks sample curated seed lyrics by video ID.
+ * 3. Calls the backend /api/lyrics endpoint (which checks ESHU Database -> LRCLIB provider pipeline).
+ * 4. Parses synced LRC into structured lines.
+ * 5. Returns formatted plain or synced lyrics, or a clean unavailable state.
  */
 export async function fetchLyricsForTrack(
   trackTitle: string,
@@ -73,38 +87,52 @@ export async function fetchLyricsForTrack(
 ): Promise<LyricsData> {
   const cleanTitle = cleanTrackTitle(trackTitle);
   const cleanArtist = cleanTrackTitle(artistName);
-  const cacheKey = `${cleanTitle.toLowerCase()}_${cleanArtist.toLowerCase()}`;
+  const metaKey = `meta_${cleanTitle.toLowerCase()}_${cleanArtist.toLowerCase()}`;
+  const vidKey = videoId ? `vid_${videoId}` : null;
 
   // 1. Check in-memory cache
-  if (MEMORY_CACHE.has(cacheKey)) {
-    return MEMORY_CACHE.get(cacheKey)!;
+  if (vidKey && MEMORY_CACHE.has(vidKey)) {
+    return MEMORY_CACHE.get(vidKey)!;
+  }
+  if (MEMORY_CACHE.has(metaKey)) {
+    return MEMORY_CACHE.get(metaKey)!;
   }
 
-  // Check localStorage cache
+  // 2. Check localStorage cache
   const localDb = getStorageCache();
-  if (localDb[cacheKey]) {
-    MEMORY_CACHE.set(cacheKey, localDb[cacheKey]);
-    return localDb[cacheKey];
+  if (vidKey && localDb[vidKey]) {
+    MEMORY_CACHE.set(vidKey, localDb[vidKey]);
+    return localDb[vidKey];
+  }
+  if (localDb[metaKey]) {
+    MEMORY_CACHE.set(metaKey, localDb[metaKey]);
+    return localDb[metaKey];
   }
 
-  // 2. Check local curated sample database by video ID
+  // 3. Check curated sample database by video ID
   if (videoId && SAMPLE_SYNCED_LYRICS[videoId]) {
     const sampleLrc = SAMPLE_SYNCED_LYRICS[videoId];
     const parsedLines = parseLrcString(sampleLrc);
     const data: LyricsData = {
+      songId: videoId,
       synced: true,
       lines: parsedLines,
+      syncedLyrics: sampleLrc,
       plainLyrics: sampleLrc.replace(/\[\d{2}:\d{2}(\.\d{2,3})?\]/g, '').trim(),
       source: 'LRCLIB',
       trackName: trackTitle,
       artistName: artistName,
     };
-    MEMORY_CACHE.set(cacheKey, data);
-    setStorageCache(cacheKey, data);
+    if (vidKey) {
+      MEMORY_CACHE.set(vidKey, data);
+      setStorageCache(vidKey, data);
+    }
+    MEMORY_CACHE.set(metaKey, data);
+    setStorageCache(metaKey, data);
     return data;
   }
 
-  // 3. Fetch from server endpoint (which checks ESHU DB -> LRCLIB -> Gemini AI)
+  // 4. Fetch from backend /api/lyrics endpoint
   try {
     const params = new URLSearchParams({
       track_name: cleanTitle,
@@ -124,7 +152,7 @@ export async function fetchLyricsForTrack(
         if (parsedLines.length > 0) {
           const lyricsResult: LyricsData = {
             id: data.id,
-            songId: data.songId,
+            songId: data.songId || videoId,
             synced: true,
             lines: parsedLines,
             syncedLyrics: data.syncedLyrics,
@@ -136,8 +164,12 @@ export async function fetchLyricsForTrack(
             album: data.album,
             isCustom: data.isCustom,
           };
-          MEMORY_CACHE.set(cacheKey, lyricsResult);
-          setStorageCache(cacheKey, lyricsResult);
+          if (vidKey) {
+            MEMORY_CACHE.set(vidKey, lyricsResult);
+            setStorageCache(vidKey, lyricsResult);
+          }
+          MEMORY_CACHE.set(metaKey, lyricsResult);
+          setStorageCache(metaKey, lyricsResult);
           return lyricsResult;
         }
       }
@@ -146,7 +178,7 @@ export async function fetchLyricsForTrack(
         const distributed = createDistributedSyncedLines(data.plainLyrics, durationSeconds || 210);
         const lyricsResult: LyricsData = {
           id: data.id,
-          songId: data.songId,
+          songId: data.songId || videoId,
           synced: distributed.length > 0,
           lines: distributed,
           plainLyrics: data.plainLyrics,
@@ -157,8 +189,12 @@ export async function fetchLyricsForTrack(
           album: data.album,
           isCustom: data.isCustom,
         };
-        MEMORY_CACHE.set(cacheKey, lyricsResult);
-        setStorageCache(cacheKey, lyricsResult);
+        if (vidKey) {
+          MEMORY_CACHE.set(vidKey, lyricsResult);
+          setStorageCache(vidKey, lyricsResult);
+        }
+        MEMORY_CACHE.set(metaKey, lyricsResult);
+        setStorageCache(metaKey, lyricsResult);
         return lyricsResult;
       }
     }
@@ -169,8 +205,9 @@ export async function fetchLyricsForTrack(
     console.warn('Lyrics server fetch exception:', err);
   }
 
-  // 4. Final Unavailable state
+  // 5. Final Unavailable state (Never hallucinate fake lyrics)
   const fallbackResult: LyricsData = {
+    songId: videoId,
     synced: false,
     lines: [],
     plainLyrics: '',
@@ -232,7 +269,7 @@ export async function saveLyricsToDatabase(record: {
   }
 
   const saved: LyricsRecord = await res.json();
-  clearLyricsCacheForTrack(record.title, record.artist);
+  clearLyricsCacheForTrack(record.title, record.artist, record.songId);
   return saved;
 }
 
@@ -262,12 +299,12 @@ export async function updateLyricsInDatabase(
 
   const updated: LyricsRecord = await res.json();
   if (record.title) {
-    clearLyricsCacheForTrack(record.title, record.artist);
+    clearLyricsCacheForTrack(record.title, record.artist, record.songId);
   }
   return updated;
 }
 
-export async function deleteLyricsFromDatabase(id: string, title?: string, artist?: string): Promise<boolean> {
+export async function deleteLyricsFromDatabase(id: string, title?: string, artist?: string, songId?: string): Promise<boolean> {
   const res = await fetch(`/api/lyrics/db/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
@@ -277,7 +314,7 @@ export async function deleteLyricsFromDatabase(id: string, title?: string, artis
   }
 
   if (title) {
-    clearLyricsCacheForTrack(title, artist);
+    clearLyricsCacheForTrack(title, artist, songId);
   }
   return true;
 }

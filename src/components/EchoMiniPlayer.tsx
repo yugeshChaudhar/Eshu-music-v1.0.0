@@ -68,11 +68,17 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
   };
 
   return (
-    <div className="fixed bottom-14 md:bottom-4 left-0 right-0 z-40 px-2 sm:px-6 pointer-events-none">
+    <div 
+      className="fixed bottom-16 md:bottom-4 left-0 right-0 z-40 px-2 sm:px-6 pointer-events-none transition-all duration-300 ease-out"
+      style={{
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px))',
+      }}
+    >
       <div className="max-w-4xl mx-auto pointer-events-auto">
         <div 
           onClick={onOpenFullPlayer}
-          className="relative overflow-hidden rounded-3xl bg-neutral-900/90 hover:bg-neutral-900/98 backdrop-blur-2xl border border-white/15 shadow-2xl p-2.5 sm:p-3 transition-all cursor-pointer group"
+          className="relative overflow-hidden rounded-3xl bg-neutral-900/92 hover:bg-neutral-900/98 active:scale-[0.985] backdrop-blur-2xl border border-white/15 shadow-2xl p-2.5 sm:p-3 transition-all duration-200 cursor-pointer group select-none animate-fadeIn"
+          style={{ willChange: 'transform, opacity' }}
         >
           {/* Subtle Ambient Glow */}
           <div 

@@ -36,6 +36,7 @@ import {
   recordTrackPlay, 
   getListeningHistory,
   sanitizeTrack,
+  isDomOrEvent,
   DEFAULT_ECHO_SETTINGS 
 } from './services/echoStorage';
 import { fetchLyricsForTrack } from './services/lyricsService';
@@ -51,6 +52,12 @@ import {
   ensureBackgroundAudioKeepAlive, 
   updateMediaSessionMetadata 
 } from './services/backgroundAudioService';
+import { 
+  getEffectivePlayerView, 
+  setSavedPlayerView, 
+  notifyTrackChanged, 
+  updatePlayerActivityTimestamp 
+} from './services/playerViewPreference';
 import { useScreenSize } from './hooks/useScreenSize';
 import { YouTubeUserProfile } from './types';
 import { YouTubeAuthModal } from './components/modals/YouTubeAuthModal';
@@ -67,6 +74,8 @@ import { LibraryScreen } from './components/screens/LibraryScreen';
 import { EqualizerScreen } from './components/screens/EqualizerScreen';
 import { AnalyticsScreen } from './components/screens/AnalyticsScreen';
 import { SettingsScreen } from './components/screens/SettingsScreen';
+import { MoodDetailScreen } from './components/screens/MoodDetailScreen';
+import { preloadAllMoods } from './services/moodDiscoveryService';
 import { 
   Plus, 
   X, 
@@ -126,7 +135,7 @@ export function App() {
   const [newPlaylistDesc, setNewPlaylistDesc] = useState<string>('');
   const [isAddToPlaylistOpen, setIsAddToPlaylistOpen] = useState<boolean>(false);
   const [trackForPlaylist, setTrackForPlaylist] = useState<Track | null>(null);
-  const [playerInitialViewMode, setPlayerInitialViewMode] = useState<PlayerViewMode>('player');
+  const [playerInitialViewMode, setPlayerInitialViewMode] = useState<PlayerViewMode>('artwork');
   const [isQueueOpen, setIsQueueOpen] = useState<boolean>(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState<boolean>(false);
   const [isAdminLyricsOpen, setIsAdminLyricsOpen] = useState<boolean>(false);
@@ -156,6 +165,9 @@ export function App() {
     if (storedYT) {
       setYoutubeUser(storedYT);
     }
+
+    // Preload dynamic mood stations in the background
+    preloadAllMoods();
 
     // Always engage background audio keepalive engine on mount
     ensureBackgroundAudioKeepAlive();
@@ -362,7 +374,9 @@ export function App() {
   useEffect(() => {
     let timer: any;
     if (isPlaying) {
+      updatePlayerActivityTimestamp();
       timer = setInterval(() => {
+        updatePlayerActivityTimestamp();
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
           const curr = ytPlayerRef.current.getCurrentTime();
           setCurrentTime(curr);
@@ -374,32 +388,40 @@ export function App() {
     return () => clearInterval(timer);
   }, [isPlaying]);
 
-  // 4. Fetch Real Synchronized Lyrics when Track Changes
+  // 4. Fetch Synchronized Lyrics when Track Changes (ESHU DB -> LRCLIB Pipeline)
   useEffect(() => {
-    if (!currentTrack) return;
+    if (!currentTrack) {
+      setLyricsData(null);
+      setIsLoadingLyrics(false);
+      return;
+    }
+
     setIsLoadingLyrics(true);
-    let isMounted = true;
+    const abortController = new AbortController();
 
     fetchLyricsForTrack(
       currentTrack.title,
       currentTrack.artist,
       currentTrack.duration,
-      currentTrack.id
+      currentTrack.id,
+      abortController.signal
     )
       .then((data) => {
-        if (isMounted) {
+        if (!abortController.signal.aborted) {
           setLyricsData(data);
           setIsLoadingLyrics(false);
         }
       })
       .catch((err) => {
+        if (err?.name === 'AbortError') return;
         console.warn('Error fetching song lyrics:', err);
-        if (isMounted) {
+        if (!abortController.signal.aborted) {
           setLyricsData({
             synced: false,
             lines: [],
-            plainLyrics: `Lyrics for "${currentTrack.title}" by ${currentTrack.artist || 'Artist'} are unavailable.`,
+            plainLyrics: '',
             source: 'None',
+            unavailable: true,
             trackName: currentTrack.title,
             artistName: currentTrack.artist,
           });
@@ -412,19 +434,30 @@ export function App() {
     setUserStats(getUserStats());
 
     return () => {
-      isMounted = false;
+      abortController.abort();
     };
-  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist]);
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.duration]);
 
   // 5. Playback Handlers
-  const handlePlayTrack = async (track: Track, newQueue?: Track[]) => {
+  const handlePlayTrack = async (trackInput: any, newQueue?: Track[]) => {
+    if (!trackInput || isDomOrEvent(trackInput)) return;
+    const track = sanitizeTrack(trackInput);
+
+    // Genuinely new track detection
+    const prevId = currentTrack?.id;
+    if (!prevId || prevId !== track.id) {
+      notifyTrackChanged(track.id);
+      setPlayerInitialViewMode('artwork');
+    }
+
     setCurrentTrack(track);
     setCurrentTime(0);
     setDuration(track.duration || 200);
 
-    if (newQueue && newQueue.length > 0) {
-      setPlayQueue(newQueue);
-      const idx = newQueue.findIndex((t) => t.id === track.id);
+    if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
+      const cleanQueue = newQueue.filter((t) => t && !isDomOrEvent(t)).map(sanitizeTrack);
+      setPlayQueue(cleanQueue);
+      const idx = cleanQueue.findIndex((t) => t.id === track.id);
       setQueueIndex(idx >= 0 ? idx : 0);
     }
 
@@ -528,8 +561,15 @@ export function App() {
   };
 
   // 6. Favorites Toggle
-  const handleToggleFavorite = (track: Track) => {
-    toggleTrackFavorite(track);
+  const handleToggleFavorite = (trackOrEvent?: any) => {
+    if (!trackOrEvent || isDomOrEvent(trackOrEvent)) {
+      if (currentTrack && !isDomOrEvent(currentTrack)) {
+        toggleTrackFavorite(currentTrack);
+        setFavorites(getFavoriteTracks());
+      }
+      return;
+    }
+    toggleTrackFavorite(trackOrEvent);
     setFavorites(getFavoriteTracks());
   };
 
@@ -556,15 +596,23 @@ export function App() {
   };
 
   const handleOpenAddToPlaylist = (trackOrEvent?: any) => {
-    if (trackOrEvent && typeof trackOrEvent === 'object' && typeof trackOrEvent.id === 'string' && typeof trackOrEvent.title === 'string') {
-      setTrackForPlaylist(trackOrEvent as Track);
+    if (
+      trackOrEvent &&
+      !isDomOrEvent(trackOrEvent) &&
+      typeof trackOrEvent === 'object' &&
+      typeof trackOrEvent.id === 'string' &&
+      trackOrEvent.id.length > 0 &&
+      typeof trackOrEvent.title === 'string'
+    ) {
+      setTrackForPlaylist(sanitizeTrack(trackOrEvent));
     } else {
-      setTrackForPlaylist(currentTrack);
+      setTrackForPlaylist(currentTrack ? sanitizeTrack(currentTrack) : null);
     }
     setIsAddToPlaylistOpen(true);
   };
 
   const handleAddToPlaylist = (playlistId: string, track: Track): boolean => {
+    if (!track || isDomOrEvent(track)) return false;
     const res = addTrackToPlaylist(playlistId, track);
     setCustomPlaylists(res.playlists);
     return res.success;
@@ -716,24 +764,26 @@ export function App() {
                   </p>
 
                   <div className="flex items-center gap-3 pt-2 justify-center sm:justify-start">
-                    <button
-                      onClick={() => handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks)}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs text-black"
-                      style={{ backgroundColor: settings.seedColor }}
-                    >
-                      <Play className="w-4 h-4 fill-black" />
-                      <span>Play</span>
-                    </button>
+                    {selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0 && (
+                      <button
+                        onClick={() => handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks)}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs text-black"
+                        style={{ backgroundColor: settings.seedColor }}
+                      >
+                        <Play className="w-4 h-4 fill-black" />
+                        <span>Play</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Tracks in Playlist */}
               <div className="space-y-2">
-                {selectedPlaylistView.tracks.map((track, idx) => (
+                {(selectedPlaylistView.tracks || []).map((track, idx) => (
                   <div
                     key={track.id}
-                    onClick={() => handlePlayTrack(track, selectedPlaylistView.tracks)}
+                    onClick={() => handlePlayTrack(track, selectedPlaylistView.tracks || [])}
                     className="p-3 rounded-2xl bg-neutral-900/60 hover:bg-neutral-900 border border-white/10 transition-all flex items-center justify-between gap-3 cursor-pointer group"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -837,57 +887,22 @@ export function App() {
 
           {/* C. Mood Detail View */}
           {!selectedPlaylistView && !selectedArtistView && selectedMoodView && (
-            <div className="space-y-6 pb-32 animate-fadeIn max-w-5xl mx-auto">
-              <button
-                onClick={() => setSelectedMoodView(null)}
-                className="flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-white transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back to Home</span>
-              </button>
-
-              <div 
-                className="p-8 rounded-3xl border border-white/10 shadow-2xl space-y-3"
-                style={{ backgroundColor: selectedMoodView.color + '22' }}
-              >
-                <h1 className="text-3xl sm:text-5xl font-extrabold text-white">
-                  {selectedMoodView.title}
-                </h1>
-                <p className="text-xs sm:text-sm text-neutral-300 max-w-xl">
-                  {selectedMoodView.subtitle}
-                </p>
-                <button
-                  onClick={() => selectedMoodView.tracks && handlePlayTrack(selectedMoodView.tracks[0], selectedMoodView.tracks)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs text-black shadow-lg"
-                  style={{ backgroundColor: settings.seedColor }}
-                >
-                  <Play className="w-4 h-4 fill-black" />
-                  <span>Start Mood Radio</span>
-                </button>
-              </div>
-
-              {/* Mood Tracks */}
-              <div className="space-y-2">
-                {(selectedMoodView.tracks || ECHO_QUICK_PICKS).map((track, idx) => (
-                  <div
-                    key={track.id}
-                    onClick={() => handlePlayTrack(track, selectedMoodView.tracks || ECHO_QUICK_PICKS)}
-                    className="p-3 rounded-2xl bg-neutral-900/60 hover:bg-neutral-900 border border-white/10 transition-all flex items-center justify-between gap-3 cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="w-5 text-center text-xs font-bold text-neutral-400">{idx + 1}</span>
-                      <img src={track.thumbnail} alt={track.title} className="w-11 h-11 rounded-xl object-cover" />
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-[#FF5252]">
-                          {track.title}
-                        </h4>
-                        <p className="text-[11px] text-neutral-400 truncate">{track.artist}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <MoodDetailScreen
+              mood={selectedMoodView}
+              onBack={() => setSelectedMoodView(null)}
+              onPlayTrack={(track, queue) => handlePlayTrack(track, queue)}
+              onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks)}
+              onShuffleAll={(tracks) => {
+                const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+                handlePlayTrack(shuffled[0], shuffled);
+              }}
+              favoriteTrackIds={favoriteSet}
+              onToggleFavorite={handleToggleFavorite}
+              onAddToPlaylist={handleOpenAddToPlaylist}
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              seedColor={settings.seedColor}
+            />
           )}
 
           {/* D. Main Tabs */}
@@ -1041,12 +1056,14 @@ export function App() {
           onNextTrack={handleNextTrack}
           onToggleFavorite={() => currentTrack && handleToggleFavorite(currentTrack)}
           onOpenFullPlayer={() => {
-            setPlayerInitialViewMode('player');
+            const effective = getEffectivePlayerView(currentTrack.id);
+            setPlayerInitialViewMode(effective);
             setIsFullPlayerOpen(true);
           }}
           onOpenQueue={() => setIsQueueOpen(true)}
           onOpenLyrics={() => {
             setPlayerInitialViewMode('lyrics');
+            setSavedPlayerView('lyrics', currentTrack.id);
             setIsFullPlayerOpen(true);
           }}
           onOpenAddToPlaylist={() => handleOpenAddToPlaylist(currentTrack)}
@@ -1070,6 +1087,7 @@ export function App() {
           lyricsData={lyricsData}
           isLoadingLyrics={isLoadingLyrics}
           initialViewMode={playerInitialViewMode}
+          onViewModeChange={(mode) => setPlayerInitialViewMode(mode)}
           onClose={() => setIsFullPlayerOpen(false)}
           onTogglePlay={handleTogglePlay}
           onPrevTrack={handlePrevTrack}

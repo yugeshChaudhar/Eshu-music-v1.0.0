@@ -10,6 +10,11 @@ import {
   ChevronRight, 
   Compass, 
   Headphones,
+  Coffee,
+  Zap,
+  Brain,
+  Moon,
+  Disc3,
   FolderHeart,
   FolderPlus,
   Plus,
@@ -19,9 +24,9 @@ import {
 } from 'lucide-react';
 import { Track, Playlist, Artist, MoodCategory, TabType, YouTubeUserProfile } from '../../types';
 import { 
-  ECHO_MOODS_AND_GENRES, 
   ECHO_TOP_ARTISTS 
 } from '../../data/echoMusicData';
+import { MOOD_DEFINITIONS, getMoodCategory } from '../../services/moodDiscoveryService';
 import { getDynamicQuickPicks } from '../../services/recommendationService';
 import { useScreenSize } from '../../hooks/useScreenSize';
 
@@ -338,15 +343,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       )}
 
                       <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-white">
-                        {pl.trackCount || pl.tracks.length} Songs
+                        {pl.trackCount || (pl.tracks ? pl.tracks.length : 0)} Songs
                       </span>
 
                       {/* Hover / Touch Quick Play Button */}
-                      {pl.tracks.length > 0 && (
+                      {pl.tracks && pl.tracks.length > 0 && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onPlayTrack(pl.tracks[0], pl.tracks);
+                            if (pl.tracks && pl.tracks.length > 0) {
+                              onPlayTrack(pl.tracks[0], pl.tracks);
+                            }
                           }}
                           className="absolute bottom-2 left-2 w-9 h-9 rounded-xl flex items-center justify-center text-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity active:scale-95"
                           style={{ backgroundColor: seedColor }}
@@ -361,7 +368,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       {pl.title}
                     </h3>
                     <p className="text-[11px] text-neutral-400 line-clamp-1 mt-0.5">
-                      {pl.description || `${pl.trackCount || pl.tracks.length} tracks`}
+                      {pl.description || `${pl.trackCount || (pl.tracks ? pl.tracks.length : 0)} tracks`}
                     </p>
                   </div>
                 </div>
@@ -390,37 +397,76 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Compass className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-              Moods & Moments
-            </h2>
+            <Compass className="w-5 h-5 text-cyan-400" />
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                <span>Moods & Moments</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 hidden sm:inline-block">
+                  Live Discovery
+                </span>
+              </h2>
+            </div>
           </div>
+          <span className="text-xs text-neutral-400 font-medium">
+            Explore 6 dynamic stations
+          </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {ECHO_MOODS_AND_GENRES.map((mood) => (
-            <div
-              key={mood.id}
-              onClick={() => onSelectMood(mood)}
-              className="p-4 rounded-3xl bg-neutral-900/70 border border-white/10 hover:border-white/25 hover:bg-neutral-900 transition-all cursor-pointer group flex flex-col justify-between h-32 sm:h-36"
-            >
-              <div 
-                className="w-8 h-8 rounded-2xl flex items-center justify-center text-white shadow-md group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: mood.color }}
-              >
-                <Headphones className="w-4 h-4" />
-              </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-3.5">
+          {MOOD_DEFINITIONS.map((def) => {
+            const moodCategory = getMoodCategory(def);
+            
+            const renderMoodIcon = () => {
+              switch (def.iconName) {
+                case 'Coffee': return <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                case 'Zap': return <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                case 'Brain': return <Brain className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                case 'Moon': return <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                case 'Disc3': return <Disc3 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                case 'Heart': return <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+                default: return <Headphones className="w-4 h-4 sm:w-5 sm:h-5 text-white" />;
+              }
+            };
 
-              <div>
-                <h3 className="text-xs sm:text-sm font-bold text-white group-hover:text-[#FF5252] transition-colors leading-tight mb-1">
-                  {mood.title}
-                </h3>
-                <p className="text-[10px] text-neutral-400 line-clamp-1">
-                  {mood.tags.join(', ')}
-                </p>
+            return (
+              <div
+                key={def.id}
+                onClick={() => onSelectMood(moodCategory)}
+                className="relative overflow-hidden p-3.5 sm:p-4 rounded-3xl bg-neutral-900/80 hover:bg-neutral-900 border border-white/10 hover:border-white/25 transition-all duration-200 cursor-pointer group flex flex-col justify-between h-36 sm:h-40 shadow-lg hover:shadow-2xl hover:-translate-y-0.5 select-none"
+              >
+                {/* Subtle Ambient Radial Glow on Hover */}
+                <div 
+                  className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-30 filter blur-xl transition-opacity pointer-events-none"
+                  style={{ backgroundColor: def.color }}
+                />
+
+                <div className="flex items-center justify-between w-full relative z-10">
+                  <div 
+                    className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-white shadow-md group-hover:scale-110 group-hover:rotate-3 transition-all duration-200 border border-white/15"
+                    style={{ 
+                      backgroundColor: def.color,
+                      boxShadow: `0 4px 14px ${def.color}40`
+                    }}
+                  >
+                    {renderMoodIcon()}
+                  </div>
+
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-7 h-7 rounded-full bg-white/15 text-white">
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <div className="relative z-10 space-y-1">
+                  <h3 className="text-xs sm:text-sm font-bold text-white group-hover:text-cyan-300 transition-colors leading-tight line-clamp-1">
+                    {def.title}
+                  </h3>
+                  <p className="text-[10px] text-neutral-400 line-clamp-1 font-medium">
+                    {def.tags.slice(0, 2).join(' • ')}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>

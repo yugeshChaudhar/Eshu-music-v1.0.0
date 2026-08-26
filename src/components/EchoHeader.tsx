@@ -1,4 +1,5 @@
 import React from 'react';
+import eshuLogoImage from '../assets/images/eshu_logo_1787596023085.jpg';
 import { 
   Search, 
   Bell, 
@@ -49,11 +50,13 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
             />
             <div className="relative w-10 h-10 rounded-2xl overflow-hidden bg-neutral-900 border border-white/20 p-0.5 flex items-center justify-center shadow-lg shadow-purple-950/40">
               <img 
-                src="/eshu-logo.png" 
+                src={eshuLogoImage || '/eshu-logo.png'} 
                 alt="Eshu Music" 
-                className="w-full h-full object-cover rounded-xl filter drop-shadow-md group-hover:scale-105 transition-transform"
+                className="w-full h-full object-contain rounded-xl filter drop-shadow-md group-hover:scale-105 transition-transform"
                 onError={(e) => {
-                  (e.currentTarget as HTMLElement).style.display = 'none';
+                  if ((e.currentTarget as HTMLImageElement).src !== '/eshu-logo.png') {
+                    (e.currentTarget as HTMLImageElement).src = '/eshu-logo.png';
+                  }
                 }}
               />
             </div>

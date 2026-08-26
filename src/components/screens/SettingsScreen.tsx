@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import eshuLogoImage from '../../assets/images/eshu_logo_1787596023085.jpg';
 import { 
   Settings, 
   Palette, 
@@ -467,7 +468,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       <section className="p-6 rounded-3xl bg-neutral-900/80 border border-white/10 shadow-xl space-y-4">
         <div className="flex items-center gap-3 border-b border-white/10 pb-4">
           <div className="w-10 h-10 rounded-2xl overflow-hidden bg-neutral-900 border border-white/20 p-0.5 flex items-center justify-center shadow-md">
-            <img src="/eshu-logo.png" alt="Eshu Music" className="w-full h-full object-cover rounded-xl" />
+            <img 
+              src={eshuLogoImage || '/eshu-logo.png'} 
+              alt="Eshu Music" 
+              className="w-full h-full object-contain rounded-xl"
+              onError={(e) => {
+                if ((e.currentTarget as HTMLImageElement).src !== '/eshu-logo.png') {
+                  (e.currentTarget as HTMLImageElement).src = '/eshu-logo.png';
+                }
+              }}
+            />
           </div>
           <div>
             <h2 className="text-sm sm:text-base font-bold text-white">About Eshu Music</h2>

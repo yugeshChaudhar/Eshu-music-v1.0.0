@@ -37,7 +37,8 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   if (!isOpen || !track) return null;
 
   const handleToggleAdd = (pl: Playlist) => {
-    const isAlreadyIn = pl.tracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id);
+    const plTracks = pl.tracks || [];
+    const isAlreadyIn = plTracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id);
     if (!isAlreadyIn) {
       const success = onAddToPlaylist(pl.id, track);
       if (success) {
@@ -130,7 +131,8 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
             </div>
           ) : (
             playlists.map((pl) => {
-              const isIncluded = pl.tracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id);
+              const plTracks = pl.tracks || [];
+              const isIncluded = plTracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id);
               return (
                 <div
                   key={pl.id}
@@ -159,7 +161,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
                     <div className="min-w-0">
                       <h4 className="text-xs sm:text-sm font-bold truncate">{pl.title}</h4>
                       <p className="text-[11px] text-neutral-400">
-                        {pl.trackCount || pl.tracks.length} tracks
+                        {pl.trackCount || plTracks.length} tracks
                       </p>
                     </div>
                   </div>

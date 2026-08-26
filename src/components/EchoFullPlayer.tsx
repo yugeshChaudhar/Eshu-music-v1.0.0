@@ -20,6 +20,7 @@ import {
   Video, 
   Image as ImageIcon,
   Film,
+  Activity,
   ShieldCheck,
   Languages,
   Loader2,
@@ -30,6 +31,12 @@ import {
   FileText
 } from 'lucide-react';
 import { Track, PlayerViewMode, LyricsData } from '../types';
+import { MusicReactiveVisualizer } from './MusicReactiveVisualizer';
+import { 
+  getEffectivePlayerView, 
+  setSavedPlayerView, 
+  updatePlayerActivityTimestamp 
+} from '../services/playerViewPreference';
 
 interface EchoFullPlayerProps {
   currentTrack: Track;
@@ -44,6 +51,7 @@ interface EchoFullPlayerProps {
   lyricsData: LyricsData | null;
   isLoadingLyrics: boolean;
   initialViewMode?: PlayerViewMode;
+  onViewModeChange?: (mode: PlayerViewMode) => void;
   sponsorBlockSkippedCount?: number;
   onClose: () => void;
   onTogglePlay: () => void;
@@ -75,7 +83,8 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   volume,
   lyricsData,
   isLoadingLyrics,
-  initialViewMode = 'artwork',
+  initialViewMode,
+  onViewModeChange,
   sponsorBlockSkippedCount = 0,
   onClose,
   onTogglePlay,
@@ -94,11 +103,217 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   onOpenLyricsStudio,
   seedColor = '#FF5252',
 }) => {
-  const [viewMode, setViewMode] = useState<PlayerViewMode>(initialViewMode);
+  const [viewMode, setViewMode] = useState<PlayerViewMode>(() => {
+    if (initialViewMode && initialViewMode !== 'artwork') {
+      return initialViewMode;
+    }
+    return getEffectivePlayerView(currentTrack.id);
+  });
+
+  // Keep viewMode synced with track identity and persistent state
+  useEffect(() => {
+    const effective = getEffectivePlayerView(currentTrack.id);
+    setViewMode(effective);
+    if (onViewModeChange) {
+      onViewModeChange(effective);
+    }
+  }, [currentTrack.id]);
+
+  // Keep session alive during player interactions
+  useEffect(() => {
+    updatePlayerActivityTimestamp();
+  }, [viewMode, currentTrack.id, isPlaying]);
+
+  const handleSelectViewMode = (newMode: PlayerViewMode) => {
+    setViewMode(newMode);
+    setSavedPlayerView(newMode, currentTrack.id);
+    if (onViewModeChange) {
+      onViewModeChange(newMode);
+    }
+  };
   const [showTranslation, setShowTranslation] = useState<boolean>(true);
   const [lyricsViewType, setLyricsViewType] = useState<'synced' | 'plain'>('synced');
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const activeLyricRef = useRef<HTMLDivElement>(null);
+
+  // Gesture & Smooth Transition References
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef<boolean>(false);
+  const isExitingRef = useRef<boolean>(false);
+  const startYRef = useRef<number>(0);
+  const startXRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(0);
+  const isDirectionLockedRef = useRef<boolean>(false);
+  const isHorizontallyLockedRef = useRef<boolean>(false);
+
+  // Smooth entrance transition on mount
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    el.style.transform = 'translate3d(0, 100%, 0) scale(0.95)';
+    el.style.opacity = '0.7';
+    el.style.willChange = 'transform, opacity';
+
+    const frame = requestAnimationFrame(() => {
+      el.style.transition = 'transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms ease-out';
+      el.style.transform = 'translate3d(0, 0, 0) scale(1)';
+      el.style.opacity = '1';
+
+      setTimeout(() => {
+        if (el && !isDraggingRef.current && !isExitingRef.current) {
+          el.style.willChange = 'auto';
+        }
+      }, 350);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  // Smooth animated minimize function
+  const handleAnimatedClose = () => {
+    if (isExitingRef.current) return;
+    isExitingRef.current = true;
+
+    const el = containerRef.current;
+    if (el) {
+      el.style.willChange = 'transform, opacity';
+      el.style.transition = 'transform 260ms cubic-bezier(0.25, 1, 0.5, 1), opacity 260ms ease-in';
+      el.style.transform = 'translate3d(0, 100%, 0) scale(0.94)';
+      el.style.opacity = '0.5';
+    }
+
+    setTimeout(() => {
+      onClose();
+    }, 260);
+  };
+
+  // Pointer event listeners for interactive slide-down gesture
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (isExitingRef.current) return;
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // Exclude interactive controls from initiating drag
+      if (
+        target.closest('button') ||
+        target.closest('input') ||
+        target.closest('a') ||
+        target.closest('select') ||
+        target.closest('textarea') ||
+        target.closest('[data-no-drag="true"]')
+      ) {
+        return;
+      }
+
+      // Check if user is scrolling inside lyrics
+      const scrollableLyrics = target.closest('.lyrics-scroll-container');
+      if (scrollableLyrics && scrollableLyrics.scrollTop > 5) {
+        // Allow native vertical scrolling of lyrics
+        return;
+      }
+
+      isDraggingRef.current = true;
+      startYRef.current = e.clientY;
+      startXRef.current = e.clientX;
+      startTimeRef.current = Date.now();
+      isDirectionLockedRef.current = false;
+      isHorizontallyLockedRef.current = false;
+
+      el.style.willChange = 'transform, opacity';
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current || isExitingRef.current) return;
+
+      const deltaY = e.clientY - startYRef.current;
+      const deltaX = e.clientX - startXRef.current;
+
+      // Determine initial gesture direction
+      if (!isDirectionLockedRef.current) {
+        if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.abs(deltaY)) {
+          isHorizontallyLockedRef.current = true;
+          isDirectionLockedRef.current = true;
+          return;
+        }
+        if (Math.abs(deltaY) > 8 && Math.abs(deltaY) > Math.abs(deltaX)) {
+          isDirectionLockedRef.current = true;
+        }
+      }
+
+      if (isHorizontallyLockedRef.current) return;
+
+      if (deltaY > 0) {
+        // Downward drag follows finger with subtle scale & opacity feedback
+        el.style.transition = 'none';
+        const scale = Math.max(0.92, 1 - (deltaY / 2800));
+        const opacity = Math.max(0.6, 1 - (deltaY / 1200));
+        el.style.transform = `translate3d(0, ${deltaY}px, 0) scale(${scale})`;
+        el.style.opacity = `${opacity}`;
+      } else {
+        // Resistance for upward drag
+        el.style.transition = 'none';
+        const resistanceY = deltaY * 0.12;
+        el.style.transform = `translate3d(0, ${resistanceY}px, 0)`;
+      }
+    };
+
+    const onPointerUpOrCancel = (e: PointerEvent) => {
+      if (!isDraggingRef.current || isExitingRef.current) {
+        isDraggingRef.current = false;
+        return;
+      }
+
+      isDraggingRef.current = false;
+
+      if (isHorizontallyLockedRef.current) {
+        isHorizontallyLockedRef.current = false;
+        return;
+      }
+
+      const totalDeltaY = e.clientY - startYRef.current;
+      const durationMs = Math.max(1, Date.now() - startTimeRef.current);
+      const velocity = totalDeltaY / durationMs; // px/ms
+
+      // Threshold: 100px downward movement OR fast flick down (velocity > 0.4 px/ms)
+      if (totalDeltaY > 100 || (totalDeltaY > 40 && velocity > 0.4)) {
+        isExitingRef.current = true;
+        el.style.transition = 'transform 260ms cubic-bezier(0.25, 1, 0.5, 1), opacity 260ms ease-in';
+        el.style.transform = 'translate3d(0, 100%, 0) scale(0.94)';
+        el.style.opacity = '0.5';
+        setTimeout(() => {
+          onClose();
+        }, 260);
+      } else {
+        // Animate smoothly back to full position
+        el.style.transition = 'transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 280ms ease-out';
+        el.style.transform = 'translate3d(0, 0, 0) scale(1)';
+        el.style.opacity = '1';
+        setTimeout(() => {
+          if (el && !isDraggingRef.current && !isExitingRef.current) {
+            el.style.willChange = 'auto';
+          }
+        }, 300);
+      }
+    };
+
+    el.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerUpOrCancel, { passive: true });
+    window.addEventListener('pointercancel', onPointerUpOrCancel, { passive: true });
+
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUpOrCancel);
+      window.removeEventListener('pointercancel', onPointerUpOrCancel);
+    };
+  }, [onClose]);
 
   // Sync initialViewMode if changed externally
   useEffect(() => {
@@ -111,12 +326,12 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        handleAnimatedClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   const formatTime = (secs: number) => {
     if (isNaN(secs) || secs < 0) return '0:00';
@@ -143,7 +358,14 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
 
 
   return (
-    <div className="fixed inset-0 z-50 bg-neutral-950 flex flex-col justify-between p-4 sm:p-8 animate-fadeIn select-none overflow-hidden">
+    <div 
+      ref={containerRef}
+      className="fixed inset-0 z-50 bg-neutral-950 flex flex-col justify-between p-3.5 sm:p-8 select-none overflow-hidden touch-pan-y"
+      style={{
+        paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+        paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
+      }}
+    >
       {/* Background Dynamic Ambient Backdrops */}
       <div 
         className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-3xl scale-125 transition-all duration-1000 pointer-events-none"
@@ -154,11 +376,19 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         style={{ backgroundColor: seedColor }}
       />
 
+      {/* Top Mobile Pull-Down Drag Bar Indicator */}
+      <div className="w-full flex justify-center pb-1 pointer-events-none">
+        <div 
+          className="w-12 h-1.5 rounded-full bg-white/30 hover:bg-white/50 active:bg-white/70 transition-all cursor-grab active:cursor-grabbing pointer-events-auto"
+          title="Slide down to minimize"
+        />
+      </div>
+
       {/* 1. Header Bar */}
-      <header className="relative z-10 flex items-center justify-between gap-4 max-w-4xl mx-auto w-full">
+      <header className="relative z-10 flex items-center justify-between gap-4 max-w-4xl mx-auto w-full pt-1">
         <button
-          onClick={onClose}
-          className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white transition-colors"
+          onClick={handleAnimatedClose}
+          className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white transition-colors cursor-pointer"
           title="Minimize"
         >
           <ChevronDown className="w-5 h-5" />
@@ -169,6 +399,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           {[
             { id: 'artwork' as PlayerViewMode, label: 'Artwork', icon: ImageIcon },
             { id: 'canvas' as PlayerViewMode, label: 'Canvas', icon: Film },
+            { id: 'visualizer' as PlayerViewMode, label: 'Visualizer', icon: Activity },
             { id: 'vinyl' as PlayerViewMode, label: 'Vinyl', icon: Disc3 },
             { id: 'lyrics' as PlayerViewMode, label: 'Lyrics', icon: Mic2 },
           ].map((mode) => {
@@ -177,14 +408,15 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
             return (
               <button
                 key={mode.id}
-                onClick={() => setViewMode(mode.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                onClick={() => handleSelectViewMode(mode.id)}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                   isSelected
                     ? 'bg-white/20 text-white shadow-sm'
                     : 'text-neutral-400 hover:text-neutral-200'
                 }`}
+                title={`Switch to ${mode.label} mode`}
               >
-                <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? seedColor : undefined }} />
+                <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isSelected ? seedColor : undefined }} />
                 <span className="hidden sm:inline">{mode.label}</span>
               </button>
             );
@@ -251,7 +483,22 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           </div>
         )}
 
-        {/* VIEW 3: Vinyl Turntable Mode */}
+        {/* VIEW 3: Real Music-Reactive Visualizer Mode */}
+        {viewMode === 'visualizer' && (
+          <div className="w-full h-full max-h-[460px] aspect-square rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-neutral-950/80 flex items-center justify-center animate-fadeIn relative">
+            <MusicReactiveVisualizer
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              isBuffering={isBuffering}
+              volume={volume}
+              currentTime={currentTime}
+              duration={duration}
+              seedColor={seedColor}
+            />
+          </div>
+        )}
+
+        {/* VIEW 4: Vinyl Turntable Mode */}
         {viewMode === 'vinyl' && (
           <div className="flex items-center justify-center animate-fadeIn">
             <div 
@@ -348,7 +595,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
             {/* Lyrics Content Display */}
             <div 
               ref={lyricsContainerRef}
-              className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar text-center py-6"
+              className="lyrics-scroll-container flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar text-center py-6 touch-pan-y"
             >
               {isLoadingLyrics ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 text-neutral-400">

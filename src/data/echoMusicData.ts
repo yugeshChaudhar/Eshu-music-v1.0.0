@@ -309,6 +309,45 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
         views: '230M',
       }
     ]
+  },
+  UK: {
+    name: 'United Kingdom Top 50',
+    flag: '🇬🇧',
+    tracks: [
+      {
+        id: 'JGwWNGJdvx8',
+        title: 'Shape of You',
+        artist: 'Ed Sheeran',
+        album: '÷',
+        duration: 233,
+        thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=80',
+        views: '6.2B',
+      },
+      {
+        id: 'hLQl3WQQoQ0',
+        title: 'Someone Like You',
+        artist: 'Adele',
+        album: '21',
+        duration: 285,
+        thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+        views: '2.1B',
+      }
+    ]
+  },
+  KR: {
+    name: 'South Korea Top 50',
+    flag: '🇰🇷',
+    tracks: [
+      {
+        id: '9bZkp7q19f0',
+        title: 'GANGNAM STYLE',
+        artist: 'PSY',
+        album: 'Psy 6 (Six Rules), Part 1',
+        duration: 252,
+        thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+        views: '4.9B',
+      }
+    ]
   }
 };
 
