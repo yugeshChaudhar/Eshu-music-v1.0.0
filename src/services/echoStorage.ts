@@ -46,11 +46,60 @@ export const DEFAULT_ECHO_SETTINGS: EchoSettings = {
 };
 
 // 1. Liked Songs / Favorites
+export function sanitizeTrack(track: any): Track {
+  if (!track || typeof track !== 'object' || !track.id) {
+    return {
+      id: `track-${Date.now()}`,
+      title: 'Unknown Track',
+      artist: 'Unknown Artist',
+      duration: 180,
+      thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
+    };
+  }
+  return {
+    id: String(track.id),
+    title: String(track.title || 'Unknown Track'),
+    artist: String(track.artist || 'Unknown Artist'),
+    album: track.album ? String(track.album) : undefined,
+    duration: typeof track.duration === 'number' && !isNaN(track.duration) ? track.duration : 180,
+    thumbnail: String(track.thumbnail || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800'),
+    videoUrl: track.videoUrl ? String(track.videoUrl) : undefined,
+    category: track.category ? String(track.category) : undefined,
+    views: track.views ? String(track.views) : undefined,
+    addedAt: typeof track.addedAt === 'number' ? track.addedAt : undefined,
+  };
+}
+
+export function sanitizePlaylist(pl: any): Playlist {
+  if (!pl || typeof pl !== 'object') {
+    return {
+      id: `pl-${Date.now()}`,
+      title: 'New Playlist',
+      thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
+      trackCount: 0,
+      tracks: [],
+    };
+  }
+  const rawTracks = Array.isArray(pl.tracks) ? pl.tracks : [];
+  const cleanTracks = rawTracks.map(sanitizeTrack);
+  return {
+    id: String(pl.id || `pl-${Date.now()}`),
+    title: String(pl.title || 'Untitled Playlist'),
+    description: pl.description ? String(pl.description) : undefined,
+    thumbnail: pl.thumbnail ? String(pl.thumbnail) : cleanTracks[0]?.thumbnail,
+    trackCount: cleanTracks.length,
+    tracks: cleanTracks,
+    author: pl.author ? String(pl.author) : undefined,
+    createdAt: typeof pl.createdAt === 'number' ? pl.createdAt : Date.now(),
+  };
+}
+
 export function getFavoriteTracks(): Track[] {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY) || localStorage.getItem('simpmusic_favorites_v1');
     if (!raw) return [];
-    return JSON.parse(raw);
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.map(sanitizeTrack) : [];
   } catch (e) {
     console.error('Failed to get favorites', e);
     return [];
@@ -62,7 +111,8 @@ export function isTrackFavorite(trackId: string): boolean {
   return list.some((t) => t.id === trackId);
 }
 
-export function toggleTrackFavorite(track: Track): boolean {
+export function toggleTrackFavorite(trackInput: Track): boolean {
+  const track = sanitizeTrack(trackInput);
   const current = getFavoriteTracks();
   const exists = current.some((t) => t.id === track.id);
   let updated: Track[];
@@ -82,14 +132,16 @@ export function getCustomPlaylists(): Playlist[] {
   try {
     const raw = localStorage.getItem(PLAYLISTS_KEY) || localStorage.getItem('simpmusic_custom_playlists_v1');
     if (!raw) return [];
-    return JSON.parse(raw);
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.map(sanitizePlaylist) : [];
   } catch (e) {
     console.error('Failed to get playlists', e);
     return [];
   }
 }
 
-export function saveCustomPlaylist(playlist: Playlist): void {
+export function saveCustomPlaylist(playlistInput: Playlist): Playlist[] {
+  const playlist = sanitizePlaylist(playlistInput);
   const current = getCustomPlaylists();
   const existingIndex = current.findIndex((p) => p.id === playlist.id);
   let updated: Playlist[];
@@ -102,26 +154,36 @@ export function saveCustomPlaylist(playlist: Playlist): void {
   }
 
   localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(updated));
+  return updated;
 }
 
-export function deleteCustomPlaylist(playlistId: string): void {
+export function deleteCustomPlaylist(playlistId: string): Playlist[] {
   const current = getCustomPlaylists();
   const updated = current.filter((p) => p.id !== playlistId);
   localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(updated));
+  return updated;
 }
 
-export function addTrackToPlaylist(playlistId: string, track: Track): boolean {
+export function addTrackToPlaylist(playlistId: string, trackInput: Track): { success: boolean; playlists: Playlist[] } {
+  const track = sanitizeTrack(trackInput);
   const current = getCustomPlaylists();
-  const playlist = current.find((p) => p.id === playlistId);
-  if (!playlist) return false;
+  const playlistIndex = current.findIndex((p) => p.id === playlistId);
+  if (playlistIndex === -1) return { success: false, playlists: current };
 
+  const playlist = { ...current[playlistIndex] };
+  playlist.tracks = playlist.tracks ? [...playlist.tracks] : [];
+  
   const hasSong = playlist.tracks.some((t) => t.id === track.id);
-  if (hasSong) return false;
+  if (hasSong) return { success: false, playlists: current };
 
   playlist.tracks.push(track);
   playlist.trackCount = playlist.tracks.length;
-  saveCustomPlaylist(playlist);
-  return true;
+  if (!playlist.thumbnail || playlist.thumbnail.includes('unsplash')) {
+    playlist.thumbnail = track.thumbnail;
+  }
+  
+  const updated = saveCustomPlaylist(playlist);
+  return { success: true, playlists: updated };
 }
 
 // 3. User Listening Stats & History
@@ -153,8 +215,9 @@ export function getUserStats(): UserStats {
   }
 }
 
-export function recordTrackPlay(track: Track, listenedSeconds: number = 30): void {
+export function recordTrackPlay(trackInput: Track, listenedSeconds: number = 30): void {
   try {
+    const track = sanitizeTrack(trackInput);
     const stats = getUserStats();
     stats.totalListeningSeconds += listenedSeconds;
     stats.totalPlays += 1;
@@ -200,7 +263,13 @@ export function getListeningHistory(): { track: Track; timestamp: number }[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY) || localStorage.getItem('simpmusic_history_v1');
     if (!raw) return [];
-    return JSON.parse(raw);
+    const list = JSON.parse(raw);
+    return Array.isArray(list)
+      ? list.map((item: any) => ({
+          track: sanitizeTrack(item.track),
+          timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
+        }))
+      : [];
   } catch (e) {
     return [];
   }

@@ -66,6 +66,7 @@ interface SimpNowPlayingModalProps {
   onDownloadCurrentSong: () => void;
   onOpenArtist?: (artistName: string) => void;
   onOpenAddToPlaylist?: () => void;
+  onOpenLyricsStudio?: () => void;
 }
 
 export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
@@ -108,6 +109,7 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
   onDownloadCurrentSong,
   onOpenArtist,
   onOpenAddToPlaylist,
+  onOpenLyricsStudio,
 }) => {
   const [viewMode, setViewMode] = useState<PlayerViewMode>('artwork');
   const [showEqModal, setShowEqModal] = useState(false);
@@ -320,22 +322,41 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
         {viewMode === 'lyrics' && (
           <div className="w-full max-w-2xl h-[360px] sm:h-[420px] flex flex-col my-auto">
             <div className="flex items-center justify-between px-2 mb-3">
-              <span className="text-xs font-semibold text-neutral-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-[#8ECAE6]" />
-                <span>Source: {lyricsData?.source || 'LRCLIB'}</span>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-neutral-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#8ECAE6]" />
+                  <span>Source: {lyricsData?.source || 'LRCLIB'}</span>
+                </span>
+                {lyricsData?.language && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-neutral-800 text-neutral-300 border border-white/10">
+                    {lyricsData.language === 'Nepali' ? '🇳🇵 Nepali' : lyricsData.language}
+                  </span>
+                )}
+              </div>
 
-              <button
-                onClick={onToggleAiTranslation}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  aiTranslationEnabled
-                    ? 'bg-[#8ECAE6]/20 border-[#8ECAE6] text-[#8ECAE6]'
-                    : 'bg-neutral-900 border-white/10 text-neutral-400 hover:text-white'
-                }`}
-              >
-                <Languages className="w-3.5 h-3.5" />
-                <span>AI Translation</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {onOpenLyricsStudio && (
+                  <button
+                    onClick={onOpenLyricsStudio}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-colors"
+                  >
+                    <Mic2 className="w-3.5 h-3.5 text-[#8ECAE6]" />
+                    <span>Studio</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={onToggleAiTranslation}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    aiTranslationEnabled
+                      ? 'bg-[#8ECAE6]/20 border-[#8ECAE6] text-[#8ECAE6]'
+                      : 'bg-neutral-900 border-white/10 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <Languages className="w-3.5 h-3.5" />
+                  <span>AI Translation</span>
+                </button>
+              </div>
             </div>
 
             <div 
@@ -370,11 +391,20 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
                   );
                 })
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-neutral-400">
-                  <Mic2 className="w-10 h-10 mb-2 opacity-30" />
+                <div className="flex flex-col items-center justify-center h-full text-neutral-400 gap-2">
+                  <Mic2 className="w-10 h-10 mb-1 opacity-30" />
                   <p className="text-sm font-medium">
-                    {lyricsData?.plainLyrics || 'No lyrics found for this track.'}
+                    {lyricsData?.plainLyrics || 'Lyrics unavailable'}
                   </p>
+                  {onOpenLyricsStudio && (
+                    <button
+                      onClick={onOpenLyricsStudio}
+                      className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8ECAE6] text-neutral-950 font-bold text-xs shadow transition-all hover:opacity-90"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Lyrics in Studio</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

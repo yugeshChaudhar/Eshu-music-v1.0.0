@@ -16,7 +16,8 @@ import {
   Loader2,
   ExternalLink,
   Check,
-  AlertCircle
+  AlertCircle,
+  FolderPlus
 } from 'lucide-react';
 import { Track, Playlist, Artist } from '../../types';
 import { ECHO_QUICK_PICKS, ECHO_TOP_ARTISTS, COUNTRY_CHARTS } from '../../data/echoMusicData';
@@ -28,6 +29,7 @@ interface SearchScreenProps {
   onPlayTrack: (track: Track, queue?: Track[]) => void;
   onAddToQueue: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
   favoriteTrackIds: Set<string>;
   onSelectArtist: (artist: Artist) => void;
   seedColor?: string;
@@ -40,6 +42,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   onPlayTrack,
   onAddToQueue,
   onToggleFavorite,
+  onAddToPlaylist,
   favoriteTrackIds,
   onSelectArtist,
   seedColor = '#FF5252',
@@ -493,6 +496,16 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {onAddToPlaylist && (
+                        <button
+                          onClick={() => onAddToPlaylist(track)}
+                          className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                          title="Add to Playlist"
+                        >
+                          <FolderPlus className="w-4 h-4" />
+                        </button>
+                      )}
+
                       <button
                         onClick={() => handleQueueTrack(track)}
                         className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"

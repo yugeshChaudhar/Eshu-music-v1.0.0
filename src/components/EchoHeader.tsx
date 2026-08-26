@@ -1,18 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   Search, 
   Bell, 
   Sliders, 
   Radio, 
-  Wifi, 
   WifiOff, 
-  Sparkles,
-  Globe,
-  Headphones,
-  Check
+  Youtube
 } from 'lucide-react';
-import { TabType } from '../types';
-import { COUNTRY_CHARTS } from '../data/echoMusicData';
+import { TabType, YouTubeUserProfile } from '../types';
 
 interface EchoHeaderProps {
   activeTab: TabType;
@@ -20,11 +15,11 @@ interface EchoHeaderProps {
   onOpenNotifications: () => void;
   onOpenSearchFocus: () => void;
   onOpenEqualizer: () => void;
-  selectedCountry: string;
-  onSelectCountry: (countryKey: string) => void;
   isOnline?: boolean;
   unreadNotifications?: number;
   seedColor?: string;
+  youtubeUser?: YouTubeUserProfile | null;
+  onOpenYouTubeAuth?: () => void;
 }
 
 export const EchoHeader: React.FC<EchoHeaderProps> = ({
@@ -33,14 +28,12 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
   onOpenNotifications,
   onOpenSearchFocus,
   onOpenEqualizer,
-  selectedCountry,
-  onSelectCountry,
   isOnline = true,
   unreadNotifications = 1,
   seedColor = '#FF5252',
+  youtubeUser = null,
+  onOpenYouTubeAuth,
 }) => {
-  const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
-
   return (
     <header className="sticky top-0 z-30 w-full bg-neutral-950/80 backdrop-blur-2xl border-b border-white/10 px-4 sm:px-6 py-3 transition-colors">
       <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
@@ -54,16 +47,15 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
               className="absolute -inset-1.5 rounded-2xl opacity-40 blur-md group-hover:opacity-75 transition-opacity"
               style={{ backgroundColor: seedColor }}
             />
-            <div className="relative w-10 h-10 rounded-2xl overflow-hidden bg-neutral-900 border border-white/20 p-1 flex items-center justify-center">
+            <div className="relative w-10 h-10 rounded-2xl overflow-hidden bg-neutral-900 border border-white/20 p-0.5 flex items-center justify-center shadow-lg shadow-purple-950/40">
               <img 
-                src="/echo-logo.png" 
+                src="/eshu-logo.png" 
                 alt="Eshu Music" 
-                className="w-full h-full object-contain filter drop-shadow-md group-hover:scale-105 transition-transform"
+                className="w-full h-full object-cover rounded-xl filter drop-shadow-md group-hover:scale-105 transition-transform"
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = 'none';
                 }}
               />
-              <Radio className="w-5 h-5 text-[#FF5252]" style={{ color: seedColor }} />
             </div>
           </div>
 
@@ -72,8 +64,8 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
               <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white flex items-center gap-1">
                 Eshu<span style={{ color: seedColor }}>Music</span>
               </span>
-              <span className="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded-md bg-white/10 text-neutral-300 border border-white/10 hidden sm:inline-block">
-                v5.2.8
+              <span className="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 hidden sm:inline-block">
+                v1.0.0
               </span>
             </div>
             <p className="text-[11px] text-neutral-400 font-medium hidden md:block">
@@ -100,56 +92,6 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
 
         {/* Right: Quick Tools & Status */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Chart Region Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setIsCountryDropdownOpen((v) => !v)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-white/10 text-xs font-semibold text-neutral-200 transition-colors"
-              title="Change Charts Region"
-            >
-              <Globe className="w-3.5 h-3.5 text-neutral-400" />
-              <span>{COUNTRY_CHARTS[selectedCountry]?.flag || '🌐'}</span>
-              <span className="hidden sm:inline">{selectedCountry}</span>
-            </button>
-
-            {isCountryDropdownOpen && (
-              <>
-                <div 
-                  className="fixed inset-0 z-40" 
-                  onClick={() => setIsCountryDropdownOpen(false)} 
-                />
-                <div className="absolute right-0 mt-2 w-48 bg-neutral-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 p-1.5 animate-fadeIn">
-                  <div className="px-3 py-1.5 text-[11px] font-bold text-neutral-400 uppercase tracking-wider border-b border-white/10 mb-1">
-                    Charts Region
-                  </div>
-                  {Object.entries(COUNTRY_CHARTS).map(([key, data]) => {
-                    const isSelected = selectedCountry === key;
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => {
-                          onSelectCountry(key);
-                          setIsCountryDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
-                          isSelected
-                            ? 'bg-white/15 text-white font-bold'
-                            : 'text-neutral-300 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="text-base">{data.flag}</span>
-                          <span>{data.name}</span>
-                        </span>
-                        {isSelected && <Check className="w-3.5 h-3.5" style={{ color: seedColor }} />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-
           {/* Equalizer & AutoEq Shortcut */}
           <button
             onClick={onOpenEqualizer}
@@ -177,6 +119,42 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
               </>
             )}
           </div>
+
+          {/* YouTube Account Avatar / Connect Button */}
+          {onOpenYouTubeAuth && (
+            <button
+              onClick={onOpenYouTubeAuth}
+              className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-all ${
+                youtubeUser
+                  ? 'bg-neutral-900/90 hover:bg-neutral-800 border-white/20 text-white'
+                  : 'bg-[#FF0000]/20 hover:bg-[#FF0000]/30 border-[#FF0000]/40 text-red-200'
+              }`}
+              title={youtubeUser ? `YouTube: ${youtubeUser.name}` : 'Connect YouTube Account'}
+            >
+              {youtubeUser ? (
+                <div className="flex items-center gap-1.5">
+                  <img 
+                    src={youtubeUser.picture} 
+                    alt={youtubeUser.name} 
+                    className="w-5 h-5 rounded-full object-cover border border-white/20"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100';
+                    }}
+                  />
+                  <span className="text-xs font-semibold max-w-[80px] truncate hidden md:inline">
+                    {youtubeUser.name.split(' ')[0]}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <Youtube className="w-4 h-4 text-[#FF0000] fill-[#FF0000]" />
+                  <span className="text-xs font-bold text-neutral-200 hidden sm:inline">
+                    Sign in
+                  </span>
+                </div>
+              )}
+            </button>
+          )}
 
           {/* Notifications Button */}
           <button

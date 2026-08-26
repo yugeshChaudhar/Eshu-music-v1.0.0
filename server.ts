@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { serverLyricsDb, normalizeForSearch } from './src/server/lyricsDatabase';
 
 interface SearchTrackResult {
   id: string;
@@ -149,6 +150,75 @@ async function scrapeYouTubeSearch(query: string): Promise<SearchTrackResult[]> 
   }
 }
 
+async function scrapeYouTubePlaylist(playlistId: string): Promise<{ title: string; author: string; thumbnail: string; tracks: SearchTrackResult[] }> {
+  try {
+    const playlistUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}&hl=en`;
+    const response = await fetch(playlistUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+
+    if (!response.ok) return { title: 'YouTube Playlist', author: 'YouTube', thumbnail: '', tracks: [] };
+
+    const html = await response.text();
+    const dataMatch = html.match(/var ytInitialData = ({.*?});<\/script>/s) ||
+                      html.match(/window\["ytInitialData"\] = ({.*?});<\/script>/s);
+
+    if (!dataMatch || !dataMatch[1]) return { title: 'YouTube Playlist', author: 'YouTube', thumbnail: '', tracks: [] };
+
+    const parsed = JSON.parse(dataMatch[1]);
+    const header = parsed?.header?.playlistHeaderRenderer || parsed?.sidebar?.playlistSidebarRenderer?.items?.[0]?.playlistSidebarPrimaryInfoRenderer;
+    const title = header?.title?.simpleText || header?.title?.runs?.[0]?.text || 'Imported YouTube Playlist';
+    const author = header?.ownerText?.runs?.[0]?.text || header?.navigationEndpoint?.showCustomThumbnailEndpoint?.title || 'YouTube';
+    const thumbnail = header?.playlistHeaderBanner?.heroPlaylistThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)?.[0]?.url ||
+      `https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800`;
+
+    const tabs = parsed?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+    const contents = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.playlistVideoListRenderer?.contents || [];
+
+    const tracks: SearchTrackResult[] = [];
+    for (const item of contents) {
+      const v = item.playlistVideoRenderer;
+      if (!v || !v.videoId) continue;
+
+      let songTitle = v.title?.runs?.[0]?.text || v.title?.simpleText || 'Track';
+      let artistName = v.shortBylineText?.runs?.[0]?.text || author;
+
+      if (songTitle.includes(' - ') && !artistName.includes(' - ')) {
+        const parts = songTitle.split(' - ');
+        artistName = parts[0].trim();
+        songTitle = parts.slice(1).join(' - ').trim();
+      }
+
+      const duration = parseInt(v.lengthSeconds || '210', 10);
+      const thumb = v.thumbnail?.thumbnails?.slice(-1)?.[0]?.url || `https://img.youtube.com/vi/${v.videoId}/hqdefault.jpg`;
+
+      tracks.push({
+        id: v.videoId,
+        title: songTitle,
+        artist: artistName.replace(/\s*-\s*Topic$/i, '').trim(),
+        album: title,
+        duration: isNaN(duration) ? 210 : duration,
+        thumbnail: thumb,
+        videoUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
+      });
+    }
+
+    return {
+      title,
+      author,
+      thumbnail: tracks[0]?.thumbnail || thumbnail,
+      tracks,
+    };
+  } catch (err) {
+    console.warn('Scrape playlist error:', err);
+    return { title: 'YouTube Playlist', author: 'YouTube', thumbnail: '', tracks: [] };
+  }
+}
+
 async function searchFallbackMusic(query: string): Promise<SearchTrackResult[]> {
   try {
     const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=15`;
@@ -283,6 +353,30 @@ async function startServer() {
     return res.status(404).json({ error: 'Could not resolve YouTube link or video ID' });
   });
 
+  // 2b. YouTube Playlist Import Endpoint (Direct URL / ID)
+  app.get('/api/youtube/playlist', async (req, res) => {
+    const raw = (req.query.url as string || req.query.list as string || req.query.id as string || '').trim();
+    if (!raw) {
+      return res.status(400).json({ error: 'url or list parameter is required' });
+    }
+    const { playlistId } = extractYouTubeInfo(raw);
+    const idToUse = playlistId || raw;
+
+    const plData = await scrapeYouTubePlaylist(idToUse);
+    if (!plData || plData.tracks.length === 0) {
+      return res.status(404).json({ error: 'No songs found in this YouTube playlist or playlist is private' });
+    }
+
+    res.json({
+      id: `yt_${idToUse}`,
+      title: plData.title,
+      author: plData.author,
+      thumbnail: plData.thumbnail,
+      tracks: plData.tracks,
+      trackCount: plData.tracks.length,
+    });
+  });
+
   // 3. Autocomplete / Search Suggestions API
   app.get('/api/search/suggestions', async (req, res) => {
     const q = (req.query.q as string || '').trim();
@@ -300,70 +394,299 @@ async function startServer() {
     }
   });
 
-  // 4. Synchronized Lyrics API (LRCLIB)
+  // 4. Synchronized Lyrics API (ESHU Database -> LRCLIB -> Gemini AI fallback)
   app.get('/api/lyrics', async (req, res) => {
-    const trackName = (req.query.track_name as string || '').trim();
-    const artistName = (req.query.artist_name as string || '').trim();
+    const rawTrack = (req.query.track_name as string || req.query.title as string || '').trim();
+    const rawArtist = (req.query.artist_name as string || req.query.artist as string || '').trim();
+    const songId = (req.query.song_id as string || req.query.songId as string || req.query.id as string || '').trim();
     const duration = req.query.duration ? parseInt(req.query.duration as string, 10) : undefined;
 
-    if (!trackName) {
+    if (!rawTrack) {
       return res.status(400).json({ error: 'track_name is required' });
     }
 
+    // Clean track title (strip video tags, remaster labels, feature credits)
+    const cleanTrack = rawTrack
+      .replace(/(\(|\[)(official\s*(music\s*)?(video|audio|lyrics|hd|4k|remastered|lyric\s*video|visualizer)|remastered\s*\d*).*?(\)|\])/gi, '')
+      .replace(/\s*-\s*(official\s*(music\s*)?(video|audio|lyrics)|visualizer)/gi, '')
+      .replace(/\s+(ft\.|feat\.|featuring)\s+.*/gi, '')
+      .trim();
+
+    const cleanArtist = rawArtist
+      .replace(/\s+(ft\.|feat\.|featuring)\s+.*/gi, '')
+      .trim();
+
     try {
+      // 1. Check ESHU Internal / Admin Database FIRST
+      const dbMatch = serverLyricsDb.findMatch(cleanTrack, cleanArtist, songId);
+      if (dbMatch && (dbMatch.syncedLyrics || dbMatch.plainLyrics)) {
+        return res.json({
+          id: dbMatch.id,
+          songId: dbMatch.songId,
+          synced: Boolean(dbMatch.syncedLyrics && dbMatch.syncedLyrics.trim().length > 0),
+          syncedLyrics: dbMatch.syncedLyrics || '',
+          plainLyrics: dbMatch.plainLyrics || '',
+          trackName: dbMatch.title || cleanTrack,
+          artistName: dbMatch.artist || cleanArtist,
+          album: dbMatch.album,
+          language: dbMatch.language,
+          source: dbMatch.source || 'ESHU Database',
+          isCustom: true,
+        });
+      }
+
+      const customHeaders = {
+        'User-Agent': 'EshuMusic/2.0 (https://github.com/eshu-music-player; contact@eshu-music.app)',
+        'Accept': 'application/json',
+      };
+
+      // 2. Strategy: Exact search on LRCLIB with track_name & artist_name
       const params = new URLSearchParams({
-        track_name: trackName,
-        artist_name: artistName,
+        track_name: cleanTrack,
+        artist_name: cleanArtist,
       });
       if (duration && !isNaN(duration) && duration > 0) {
         params.append('duration', duration.toString());
       }
 
-      let lrclibRes = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+      let lrclibRes = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { headers: customHeaders });
       if (lrclibRes.ok) {
         const data = await lrclibRes.json();
-        return res.json({
-          synced: Boolean(data.syncedLyrics),
-          syncedLyrics: data.syncedLyrics || '',
-          plainLyrics: data.plainLyrics || '',
-          trackName: data.trackName,
-          artistName: data.artistName,
-          source: 'LRCLIB',
-        });
-      }
-
-      const searchParams = new URLSearchParams({
-        q: `${trackName} ${artistName}`.trim(),
-      });
-      const searchRes = await fetch(`https://lrclib.net/api/search?${searchParams.toString()}`);
-      if (searchRes.ok) {
-        const results = await searchRes.json();
-        if (Array.isArray(results) && results.length > 0) {
-          const best = results[0];
+        if (data && (data.syncedLyrics || data.plainLyrics)) {
           return res.json({
-            synced: Boolean(best.syncedLyrics),
-            syncedLyrics: best.syncedLyrics || '',
-            plainLyrics: best.plainLyrics || '',
-            trackName: best.trackName,
-            artistName: best.artistName,
+            synced: Boolean(data.syncedLyrics),
+            syncedLyrics: data.syncedLyrics || '',
+            plainLyrics: data.plainLyrics || '',
+            trackName: data.trackName || cleanTrack,
+            artistName: data.artistName || cleanArtist,
             source: 'LRCLIB',
           });
         }
       }
 
+      // Strategy: Exact search on LRCLIB without duration (in case YouTube duration differs slightly)
+      if (duration) {
+        const paramsNoDuration = new URLSearchParams({
+          track_name: cleanTrack,
+          artist_name: cleanArtist,
+        });
+        const resNoDur = await fetch(`https://lrclib.net/api/get?${paramsNoDuration.toString()}`, { headers: customHeaders });
+        if (resNoDur.ok) {
+          const data = await resNoDur.json();
+          if (data && (data.syncedLyrics || data.plainLyrics)) {
+            return res.json({
+              synced: Boolean(data.syncedLyrics),
+              syncedLyrics: data.syncedLyrics || '',
+              plainLyrics: data.plainLyrics || '',
+              trackName: data.trackName || cleanTrack,
+              artistName: data.artistName || cleanArtist,
+              source: 'LRCLIB',
+            });
+          }
+        }
+      }
+
+      // Strategy: General search on LRCLIB
+      const searchQueries = [
+        `${cleanTrack} ${cleanArtist}`.trim(),
+        cleanTrack,
+      ];
+
+      for (const query of searchQueries) {
+        if (!query) continue;
+        const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`, { headers: customHeaders });
+        if (searchRes.ok) {
+          const results = await searchRes.json();
+          if (Array.isArray(results) && results.length > 0) {
+            const bestSynced = results.find((r: any) => r.syncedLyrics);
+            const best = bestSynced || results[0];
+            if (best && (best.syncedLyrics || best.plainLyrics)) {
+              return res.json({
+                synced: Boolean(best.syncedLyrics),
+                syncedLyrics: best.syncedLyrics || '',
+                plainLyrics: best.plainLyrics || '',
+                trackName: best.trackName || cleanTrack,
+                artistName: best.artistName || cleanArtist,
+                source: 'LRCLIB',
+              });
+            }
+          }
+        }
+      }
+
+      // 3. Fallback: Server-side Gemini AI Lyrics generation if configured
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const prompt = `You are an authentic music lyrics database engine. Output the accurate, synchronized lyrics in standard LRC format for the song:
+Title: "${cleanTrack}"
+Artist: "${cleanArtist || 'Unknown'}"
+Approximate Duration: ${duration || 210} seconds.
+
+Rules:
+1. Provide the REAL, authentic lyrics in the song's original language (e.g. Nepali in Devanagari script, Hindi in Devanagari, English, etc.).
+2. Format strictly as standard LRC with timestamps for each line:
+[00:12.50]Lyric line
+[00:18.00]Next lyric line
+3. Space out timestamps realistically across the song's duration (from 0s up to ${(duration || 210) - 10}s).
+4. Output ONLY the raw LRC lines. Do not wrap in markdown or commentary.`;
+
+          const aiResponse = await ai.models.generateContent({
+            model: 'gemini-3.7-flash',
+            contents: prompt,
+          });
+
+          const generatedText = aiResponse?.text?.trim();
+          if (generatedText && generatedText.includes('[')) {
+            const cleanedLrc = generatedText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
+            return res.json({
+              synced: true,
+              syncedLyrics: cleanedLrc,
+              plainLyrics: cleanedLrc.replace(/\[\d{2}:\d{2}(\.\d{2,3})?\]/g, '').trim(),
+              trackName: cleanTrack,
+              artistName: cleanArtist,
+              source: 'Gemini AI',
+            });
+          }
+        } catch (aiErr) {
+          console.warn('Gemini AI lyrics fallback notice:', aiErr);
+        }
+      }
+
+      // 4. If not found in any source:
+      return res.json({
+        synced: false,
+        syncedLyrics: '',
+        plainLyrics: '',
+        source: 'None',
+        unavailable: true,
+        trackName: cleanTrack,
+        artistName: cleanArtist,
+      });
+    } catch (err) {
+      console.warn('Lyrics route error:', err);
       res.json({
         synced: false,
         syncedLyrics: '',
-        plainLyrics: 'No synchronized lyrics found for this track.',
+        plainLyrics: '',
         source: 'None',
+        unavailable: true,
       });
-    } catch {
-      res.json({
-        synced: false,
-        syncedLyrics: '',
-        plainLyrics: 'Could not connect to lyrics provider.',
-        source: 'None',
+    }
+  });
+
+  // 4b. ESHU Database REST API - List / Query Lyrics Records
+  app.get('/api/lyrics/db', (req, res) => {
+    try {
+      const q = (req.query.q as string || '').trim().toLowerCase();
+      const title = (req.query.title as string || '').trim();
+      const artist = (req.query.artist as string || '').trim();
+      const songId = (req.query.songId as string || '').trim();
+
+      if (title || artist || songId) {
+        const match = serverLyricsDb.findMatch(title, artist, songId);
+        return res.json({ records: match ? [match] : [] });
+      }
+
+      let all = serverLyricsDb.getAll();
+      if (q) {
+        all = all.filter((r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.artist.toLowerCase().includes(q) ||
+          (r.album && r.album.toLowerCase().includes(q)) ||
+          (r.language && r.language.toLowerCase().includes(q))
+        );
+      }
+
+      res.json({ records: all, count: all.length });
+    } catch (err) {
+      console.warn('GET /api/lyrics/db error:', err);
+      res.status(500).json({ error: 'Failed to retrieve lyrics from database' });
+    }
+  });
+
+  // 4c. ESHU Database REST API - Get by ID
+  app.get('/api/lyrics/db/:id', (req, res) => {
+    try {
+      const record = serverLyricsDb.getById(req.params.id);
+      if (!record) {
+        return res.status(404).json({ error: 'Lyrics record not found' });
+      }
+      res.json(record);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch lyrics record' });
+    }
+  });
+
+  // 4d. ESHU Database REST API - Create / Add Record
+  app.post('/api/lyrics/db', (req, res) => {
+    try {
+      const { title, artist, album, language, plainLyrics, syncedLyrics, songId, source } = req.body;
+
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: 'Song title is required.' });
+      }
+      if (!artist || !artist.trim()) {
+        return res.status(400).json({ error: 'Artist name is required.' });
+      }
+      if (!plainLyrics && !syncedLyrics) {
+        return res.status(400).json({ error: 'Either plainLyrics or syncedLyrics must be provided.' });
+      }
+
+      const created = serverLyricsDb.create({
+        title: title.trim(),
+        artist: artist.trim(),
+        album: album ? album.trim() : undefined,
+        language: language || 'Nepali',
+        plainLyrics: plainLyrics || (syncedLyrics ? syncedLyrics.replace(/\[\d{2}:\d{2}(\.\d{2,3})?\]/g, '').trim() : ''),
+        syncedLyrics: syncedLyrics ? syncedLyrics.trim() : undefined,
+        songId: songId ? songId.trim() : undefined,
+        source: source || 'ESHU Database (Admin)',
       });
+
+      res.status(201).json(created);
+    } catch (err: any) {
+      console.warn('POST /api/lyrics/db error:', err);
+      res.status(500).json({ error: err.message || 'Failed to save lyrics record.' });
+    }
+  });
+
+  // 4e. ESHU Database REST API - Update Record
+  app.put('/api/lyrics/db/:id', (req, res) => {
+    try {
+      const { title, artist, album, language, plainLyrics, syncedLyrics, songId, source } = req.body;
+      const updated = serverLyricsDb.update(req.params.id, {
+        ...(title && { title: title.trim() }),
+        ...(artist && { artist: artist.trim() }),
+        ...(album !== undefined && { album: album.trim() }),
+        ...(language && { language }),
+        ...(plainLyrics !== undefined && { plainLyrics }),
+        ...(syncedLyrics !== undefined && { syncedLyrics }),
+        ...(songId !== undefined && { songId }),
+        ...(source && { source }),
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: 'Lyrics record not found to update.' });
+      }
+
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update lyrics record.' });
+    }
+  });
+
+  // 4f. ESHU Database REST API - Delete Record
+  app.delete('/api/lyrics/db/:id', (req, res) => {
+    try {
+      const success = serverLyricsDb.delete(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: 'Lyrics record not found to delete.' });
+      }
+      res.json({ success: true, message: 'Lyrics deleted successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete lyrics record.' });
     }
   });
 

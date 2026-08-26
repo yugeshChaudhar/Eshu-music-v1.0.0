@@ -8,7 +8,8 @@ import {
   Mic2, 
   Maximize2,
   Sparkles,
-  Loader2
+  Loader2,
+  FolderPlus
 } from 'lucide-react';
 import { Track } from '../types';
 
@@ -26,6 +27,8 @@ interface EchoMiniPlayerProps {
   onOpenFullPlayer: () => void;
   onOpenQueue: () => void;
   onOpenLyrics: () => void;
+  onAddToPlaylist?: () => void;
+  onOpenAddToPlaylist?: () => void;
   onSeek: (seconds: number) => void;
   seedColor?: string;
 }
@@ -44,6 +47,8 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
   onOpenFullPlayer,
   onOpenQueue,
   onOpenLyrics,
+  onAddToPlaylist,
+  onOpenAddToPlaylist,
   onSeek,
   seedColor = '#FF5252',
 }) => {
@@ -114,6 +119,20 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
 
             {/* Right: Controls */}
             <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+              {/* Add to Playlist Button */}
+              {(onOpenAddToPlaylist || onAddToPlaylist) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    (onOpenAddToPlaylist || onAddToPlaylist)?.();
+                  }}
+                  className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                  title="Add to Playlist"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                </button>
+              )}
+
               {/* Like / Favorite Button */}
               <button
                 onClick={(e) => {
@@ -206,3 +225,4 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
     </div>
   );
 };
+

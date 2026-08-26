@@ -11,14 +11,13 @@ import {
   TenBandEqualizer, 
   EqualizerPreset, 
   UserStats, 
-  SleepTimerState 
+  SleepTimerState,
+  PlayerViewMode
 } from './types';
 import { 
   ECHO_QUICK_PICKS, 
-  COUNTRY_CHARTS, 
   ECHO_MOODS_AND_GENRES, 
   ECHO_TOP_ARTISTS, 
-  ECHO_CURATED_PLAYLISTS, 
   AUTO_EQ_PROFILES, 
   EQUALIZER_PRESETS_10_BAND 
 } from './data/echoMusicData';
@@ -28,15 +27,35 @@ import {
   getCustomPlaylists, 
   saveCustomPlaylist, 
   deleteCustomPlaylist, 
+  addTrackToPlaylist,
   getFollowedArtists, 
   toggleFollowArtist, 
   getSavedSettings, 
   saveSettings, 
   getUserStats, 
   recordTrackPlay, 
+  getListeningHistory,
+  sanitizeTrack,
   DEFAULT_ECHO_SETTINGS 
 } from './services/echoStorage';
+import { fetchLyricsForTrack } from './services/lyricsService';
 import { resolveRealVideoId } from './services/universalSearchService';
+import { 
+  getStoredYouTubeUser, 
+  saveStoredYouTubeUser, 
+  fetchGoogleUserProfile, 
+  fetchUserYouTubePlaylists,
+  YOUTUBE_OAUTH_SCOPES 
+} from './services/youtubeAuthService';
+import { 
+  ensureBackgroundAudioKeepAlive, 
+  updateMediaSessionMetadata 
+} from './services/backgroundAudioService';
+import { useScreenSize } from './hooks/useScreenSize';
+import { YouTubeUserProfile } from './types';
+import { YouTubeAuthModal } from './components/modals/YouTubeAuthModal';
+import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal';
+import { AdminLyricsModal } from './components/modals/AdminLyricsModal';
 import { EchoHeader } from './components/EchoHeader';
 import { EchoNavigation } from './components/EchoNavigation';
 import { EchoMiniPlayer } from './components/EchoMiniPlayer';
@@ -66,9 +85,10 @@ import {
 } from 'lucide-react';
 
 export function App() {
+  const screenSize = useScreenSize();
+
   // Navigation & Screen State
   const [activeTab, setActiveTab] = useState<TabType>('home');
-  const [selectedCountry, setSelectedCountry] = useState<string>('GLOBAL');
 
   // Player State
   const [currentTrack, setCurrentTrack] = useState<Track | null>(ECHO_QUICK_PICKS[0]);
@@ -89,6 +109,7 @@ export function App() {
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   const [settings, setSettings] = useState<EchoSettings>(DEFAULT_ECHO_SETTINGS);
   const [userStats, setUserStats] = useState<UserStats>(getUserStats());
+  const [historyList, setHistoryList] = useState<{ track: Track; timestamp: number }[]>([]);
 
   // Lyrics State
   const [lyricsData, setLyricsData] = useState<LyricsData | null>(null);
@@ -103,26 +124,162 @@ export function App() {
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState<boolean>(false);
   const [newPlaylistTitle, setNewPlaylistTitle] = useState<string>('');
   const [newPlaylistDesc, setNewPlaylistDesc] = useState<string>('');
+  const [isAddToPlaylistOpen, setIsAddToPlaylistOpen] = useState<boolean>(false);
+  const [trackForPlaylist, setTrackForPlaylist] = useState<Track | null>(null);
+  const [playerInitialViewMode, setPlayerInitialViewMode] = useState<PlayerViewMode>('player');
   const [isQueueOpen, setIsQueueOpen] = useState<boolean>(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState<boolean>(false);
+  const [isAdminLyricsOpen, setIsAdminLyricsOpen] = useState<boolean>(false);
   const [sleepTimer, setSleepTimer] = useState<SleepTimerState>({ active: false, totalMinutes: 0, remainingSeconds: 0, fadeOut: true });
   const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
+
+  // YouTube OAuth & Playlist Import State
+  const [youtubeUser, setYoutubeUser] = useState<YouTubeUserProfile | null>(null);
+  const [isYouTubeModalOpen, setIsYouTubeModalOpen] = useState<boolean>(false);
+  const [isSyncingYouTube, setIsSyncingYouTube] = useState<boolean>(false);
+  const [youtubeSyncStatus, setYoutubeSyncStatus] = useState<string | null>(null);
+  const tokenClientRef = useRef<any>(null);
 
   // Hidden YouTube Audio Player
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const ytPlayerRef = useRef<any>(null);
 
-  // 1. Initial Data Load
+  // 1. Initial Data Load & Stored YouTube User
   useEffect(() => {
     setFavorites(getFavoriteTracks());
     setCustomPlaylists(getCustomPlaylists());
     setFollowedArtists(getFollowedArtists());
+    setHistoryList(getListeningHistory());
     const saved = getSavedSettings();
     setSettings(saved);
-    if (saved.selectedCountryChart) {
-      setSelectedCountry(saved.selectedCountryChart);
+    const storedYT = getStoredYouTubeUser();
+    if (storedYT) {
+      setYoutubeUser(storedYT);
+    }
+
+    // Always engage background audio keepalive engine on mount
+    ensureBackgroundAudioKeepAlive();
+
+    // Prevent background tab pauses
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        ensureBackgroundAudioKeepAlive();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // 1b. Initialize Google Identity Services (OAuth Token Client)
+  useEffect(() => {
+    const initGsi = () => {
+      const google = (window as any).google;
+      if (google && google.accounts && google.accounts.oauth2) {
+        try {
+          tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+            client_id: '671779401018-b2m6e611q5g057n4u29iuj08e2r8j47r.apps.googleusercontent.com',
+            scope: YOUTUBE_OAUTH_SCOPES,
+            callback: async (tokenResponse: any) => {
+              if (tokenResponse && tokenResponse.access_token) {
+                const token = tokenResponse.access_token;
+                setIsSyncingYouTube(true);
+                setYoutubeSyncStatus('Connecting to Google & YouTube...');
+                try {
+                  const profile = await fetchGoogleUserProfile(token);
+                  setYoutubeUser(profile);
+                  saveStoredYouTubeUser(profile);
+
+                  setYoutubeSyncStatus('Importing your YouTube playlists...');
+                  const importedPlaylists = await fetchUserYouTubePlaylists(token, (status) => {
+                    setYoutubeSyncStatus(status);
+                  });
+
+                  if (importedPlaylists && importedPlaylists.length > 0) {
+                    // Merge with existing custom playlists (preserve non-imported or replace matching)
+                    for (const pl of importedPlaylists) {
+                      saveCustomPlaylist(pl);
+                    }
+                    setCustomPlaylists(getCustomPlaylists());
+                    setYoutubeSyncStatus(`Successfully imported ${importedPlaylists.length} playlists!`);
+                  } else {
+                    setYoutubeSyncStatus('No custom playlists found on this YouTube account.');
+                  }
+                } catch (err: any) {
+                  console.error('YouTube import failed:', err);
+                  setYoutubeSyncStatus(`Import error: ${err.message || 'Check connection'}`);
+                } finally {
+                  setIsSyncingYouTube(false);
+                }
+              }
+            },
+          });
+        } catch (e) {
+          console.warn('Google Identity Services initTokenClient error:', e);
+        }
+      }
+    };
+
+    if ((window as any).google) {
+      initGsi();
+    } else {
+      const interval = setInterval(() => {
+        if ((window as any).google) {
+          initGsi();
+          clearInterval(interval);
+        }
+      }, 500);
+      return () => clearInterval(interval);
     }
   }, []);
+
+  // YouTube Login Trigger
+  const handleYouTubeLogin = () => {
+    if (tokenClientRef.current) {
+      tokenClientRef.current.requestAccessToken();
+    } else {
+      alert('Google Sign-In is loading, please try again in a moment.');
+    }
+  };
+
+  // YouTube Logout Trigger
+  const handleYouTubeLogout = () => {
+    saveStoredYouTubeUser(null);
+    setYoutubeUser(null);
+    setYoutubeSyncStatus(null);
+  };
+
+  // Manual YouTube Sync & Re-import
+  const handleSyncYouTubePlaylists = async () => {
+    if (!youtubeUser?.accessToken) {
+      handleYouTubeLogin();
+      return;
+    }
+
+    setIsSyncingYouTube(true);
+    setYoutubeSyncStatus('Connecting to YouTube API...');
+
+    try {
+      const importedPlaylists = await fetchUserYouTubePlaylists(youtubeUser.accessToken, (status) => {
+        setYoutubeSyncStatus(status);
+      });
+
+      if (importedPlaylists && importedPlaylists.length > 0) {
+        for (const pl of importedPlaylists) {
+          saveCustomPlaylist(pl);
+        }
+        setCustomPlaylists(getCustomPlaylists());
+        setYoutubeSyncStatus(`Sync complete! ${importedPlaylists.length} playlists updated.`);
+      } else {
+        setYoutubeSyncStatus('No playlists found on your YouTube account.');
+      }
+    } catch (err: any) {
+      console.warn('Sync failed, requesting re-authentication:', err);
+      // Access token may have expired, re-request token
+      handleYouTubeLogin();
+    } finally {
+      setIsSyncingYouTube(false);
+    }
+  };
 
   // 2. Initialize YouTube Iframe Player
   useEffect(() => {
@@ -217,38 +374,47 @@ export function App() {
     return () => clearInterval(timer);
   }, [isPlaying]);
 
-  // 4. Fetch Lyrics when Track Changes
+  // 4. Fetch Real Synchronized Lyrics when Track Changes
   useEffect(() => {
     if (!currentTrack) return;
     setIsLoadingLyrics(true);
+    let isMounted = true;
 
-    // Mock rich synchronized LRCLIB fallback data
-    const mockSyncedLines = [
-      { timeMs: 0, text: `♪ ${currentTrack.title} ♪`, translation: '♪ Instrumental Intro ♪' },
-      { timeMs: 4000, text: `Performed by ${currentTrack.artist}`, translation: 'High-Fidelity Audio Stream' },
-      { timeMs: 8000, text: 'Echoing through the endless night', translation: 'Glow in the rhythmic pulse' },
-      { timeMs: 14000, text: 'Feel the bassline taking flight', translation: 'AutoEq balanced acoustics' },
-      { timeMs: 20000, text: 'Colors dancing in the sound', translation: 'Spatial stage surrounding you' },
-      { timeMs: 28000, text: 'Highest fidelity we have found', translation: 'Lossless studio clarity' },
-      { timeMs: 36000, text: 'Yeah, we never let it go...', translation: 'Never fading away...' },
-    ];
-
-    setTimeout(() => {
-      setLyricsData({
-        synced: true,
-        lines: mockSyncedLines,
-        plainLyrics: mockSyncedLines.map((l) => l.text).join('\n'),
-        source: 'LRCLIB',
-        trackName: currentTrack.title,
-        artistName: currentTrack.artist,
+    fetchLyricsForTrack(
+      currentTrack.title,
+      currentTrack.artist,
+      currentTrack.duration,
+      currentTrack.id
+    )
+      .then((data) => {
+        if (isMounted) {
+          setLyricsData(data);
+          setIsLoadingLyrics(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Error fetching song lyrics:', err);
+        if (isMounted) {
+          setLyricsData({
+            synced: false,
+            lines: [],
+            plainLyrics: `Lyrics for "${currentTrack.title}" by ${currentTrack.artist || 'Artist'} are unavailable.`,
+            source: 'None',
+            trackName: currentTrack.title,
+            artistName: currentTrack.artist,
+          });
+          setIsLoadingLyrics(false);
+        }
       });
-      setIsLoadingLyrics(false);
-    }, 400);
 
     // Record stats
     recordTrackPlay(currentTrack, 30);
     setUserStats(getUserStats());
-  }, [currentTrack?.id]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist]);
 
   // 5. Playback Handlers
   const handlePlayTrack = async (track: Track, newQueue?: Track[]) => {
@@ -286,27 +452,25 @@ export function App() {
     }
     setIsPlaying(true);
 
-    // Sync browser MediaSession for notifications and keyboard media keys
-    if ('mediaSession' in navigator) {
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: track.title,
-          artist: track.artist,
-          album: track.album || 'Eshu Music',
-          artwork: [
-            { src: track.thumbnail || `https://img.youtube.com/vi/${actualVideoId}/hqdefault.jpg`, sizes: '512x512', type: 'image/jpeg' },
-          ],
-        });
+    // Keep background audio engine alive unconditionally
+    ensureBackgroundAudioKeepAlive();
 
-        navigator.mediaSession.setActionHandler('play', () => handleTogglePlay());
-        navigator.mediaSession.setActionHandler('pause', () => handleTogglePlay());
-        navigator.mediaSession.setActionHandler('nexttrack', () => handleNextTrack());
-        navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevTrack());
-      } catch {}
-    }
+    // Sync system MediaSession API metadata & background playback controls
+    updateMediaSessionMetadata({
+      track,
+      isPlaying: true,
+      currentTime: 0,
+      duration: track.duration || 200,
+      onPlay: () => handleTogglePlay(),
+      onPause: () => handleTogglePlay(),
+      onNext: () => handleNextTrack(),
+      onPrev: () => handlePrevTrack(),
+      onSeek: (sec) => handleSeek(sec),
+    });
   };
 
   const handleTogglePlay = () => {
+    ensureBackgroundAudioKeepAlive();
     if (isPlaying) {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
         ytPlayerRef.current.pauseVideo();
@@ -384,11 +548,67 @@ export function App() {
       createdAt: Date.now(),
     };
 
-    saveCustomPlaylist(newPl);
-    setCustomPlaylists(getCustomPlaylists());
+    const updated = saveCustomPlaylist(newPl);
+    setCustomPlaylists(updated);
     setNewPlaylistTitle('');
     setNewPlaylistDesc('');
     setIsCreatePlaylistOpen(false);
+  };
+
+  const handleOpenAddToPlaylist = (trackOrEvent?: any) => {
+    if (trackOrEvent && typeof trackOrEvent === 'object' && typeof trackOrEvent.id === 'string' && typeof trackOrEvent.title === 'string') {
+      setTrackForPlaylist(trackOrEvent as Track);
+    } else {
+      setTrackForPlaylist(currentTrack);
+    }
+    setIsAddToPlaylistOpen(true);
+  };
+
+  const handleAddToPlaylist = (playlistId: string, track: Track): boolean => {
+    const res = addTrackToPlaylist(playlistId, track);
+    setCustomPlaylists(res.playlists);
+    return res.success;
+  };
+
+  const handleCreatePlaylistWithTrack = (title: string, trackInput: Track) => {
+    const track = sanitizeTrack(trackInput);
+    const newPl: Playlist = {
+      id: `pl-${Date.now()}`,
+      title: title.trim(),
+      description: 'Custom playlist created on Eshu Music',
+      thumbnail: track.thumbnail || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+      trackCount: 1,
+      tracks: [track],
+      createdAt: Date.now(),
+      author: 'You',
+    };
+    const updated = saveCustomPlaylist(newPl);
+    setCustomPlaylists(updated);
+  };
+
+  const handleDirectImportPlaylist = async (urlOrId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/youtube/playlist?url=${encodeURIComponent(urlOrId)}`);
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data.tracks || data.tracks.length === 0) return false;
+      const newPl: Playlist = {
+        id: data.id || `yt_${Date.now()}`,
+        title: data.title || 'Imported YouTube Playlist',
+        description: `Imported from YouTube (${data.tracks.length} tracks)`,
+        thumbnail: data.thumbnail || data.tracks[0]?.thumbnail,
+        trackCount: data.tracks.length,
+        tracks: data.tracks,
+        author: data.author || 'YouTube',
+        createdAt: Date.now(),
+      };
+      const updated = saveCustomPlaylist(newPl);
+      setCustomPlaylists(updated);
+      return true;
+    } catch (e) {
+      console.error('Direct import error', e);
+      return false;
+    }
   };
 
   const favoriteSet = new Set(favorites.map((t) => t.id));
@@ -404,8 +624,11 @@ export function App() {
     <div className={`min-h-screen text-white flex flex-col font-sans selection:bg-[#FF5252] selection:text-white ${
       settings.theme === 'amoled-noir' ? 'bg-black' : 'bg-neutral-950'
     }`}>
-      {/* Hidden YouTube Engine */}
-      <div className="fixed -bottom-96 -right-96 w-48 h-32 opacity-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
+      {/* Background YouTube Audio Stream Anchor */}
+      <div 
+        className="fixed bottom-0 right-0 w-[1px] h-[1px] opacity-[0.01] pointer-events-none z-0 overflow-hidden" 
+        aria-hidden="true"
+      >
         <div id="echo-youtube-engine" />
       </div>
 
@@ -421,13 +644,8 @@ export function App() {
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenSearchFocus={() => setActiveTab('search')}
         onOpenEqualizer={() => setActiveTab('equalizer')}
-        selectedCountry={selectedCountry}
-        onSelectCountry={(country) => {
-          setSelectedCountry(country);
-          const updated = { ...settings, selectedCountryChart: country };
-          setSettings(updated);
-          saveSettings(updated);
-        }}
+        youtubeUser={youtubeUser}
+        onOpenYouTubeAuth={() => setIsYouTubeModalOpen(true)}
         seedColor={settings.seedColor}
       />
 
@@ -689,15 +907,15 @@ export function App() {
                   onSelectArtist={(art) => setSelectedArtistView(art)}
                   onSelectMood={(mood) => setSelectedMoodView(mood)}
                   onTabChange={(tab) => setActiveTab(tab)}
-                  selectedCountry={selectedCountry}
-                  onSelectCountry={(c) => {
-                    setSelectedCountry(c);
-                    const updated = { ...settings, selectedCountryChart: c };
-                    setSettings(updated);
-                    saveSettings(updated);
-                  }}
+                  customPlaylists={customPlaylists}
+                  onCreatePlaylist={() => setIsCreatePlaylistOpen(true)}
                   favoriteTrackIds={favoriteSet}
                   onToggleFavorite={handleToggleFavorite}
+                  onAddToPlaylist={handleOpenAddToPlaylist}
+                  history={historyList}
+                  favoriteTracks={favorites}
+                  youtubeUser={youtubeUser}
+                  onOpenYouTubeAuth={() => setIsYouTubeModalOpen(true)}
                   seedColor={settings.seedColor}
                 />
               )}
@@ -709,6 +927,7 @@ export function App() {
                   onPlayTrack={handlePlayTrack}
                   onAddToQueue={(track) => setPlayQueue((prev) => [...prev, track])}
                   onToggleFavorite={handleToggleFavorite}
+                  onAddToPlaylist={handleOpenAddToPlaylist}
                   favoriteTrackIds={favoriteSet}
                   onSelectArtist={(art) => setSelectedArtistView(art)}
                   seedColor={settings.seedColor}
@@ -738,10 +957,13 @@ export function App() {
                   onSelectPlaylist={(pl) => setSelectedPlaylistView(pl)}
                   onCreatePlaylist={() => setIsCreatePlaylistOpen(true)}
                   onDeletePlaylist={(id) => {
-                    deleteCustomPlaylist(id);
-                    setCustomPlaylists(getCustomPlaylists());
+                    const updated = deleteCustomPlaylist(id);
+                    setCustomPlaylists(updated);
                   }}
                   onToggleFavorite={handleToggleFavorite}
+                  onAddToPlaylist={handleOpenAddToPlaylist}
+                  youtubeUser={youtubeUser}
+                  onOpenYouTubeAuth={() => setIsYouTubeModalOpen(true)}
                   seedColor={settings.seedColor}
                 />
               )}
@@ -792,6 +1014,11 @@ export function App() {
                     localStorage.removeItem('echo_music_stats_v2');
                     setUserStats(getUserStats());
                   }}
+                  youtubeUser={youtubeUser}
+                  onOpenYouTubeAuth={() => setIsYouTubeModalOpen(true)}
+                  onLogoutYouTube={handleYouTubeLogout}
+                  onSyncYouTubePlaylists={handleSyncYouTubePlaylists}
+                  isSyncingYouTube={isSyncingYouTube}
                   seedColor={settings.seedColor}
                 />
               )}
@@ -813,9 +1040,16 @@ export function App() {
           onTogglePlay={handleTogglePlay}
           onNextTrack={handleNextTrack}
           onToggleFavorite={() => currentTrack && handleToggleFavorite(currentTrack)}
-          onOpenFullPlayer={() => setIsFullPlayerOpen(true)}
+          onOpenFullPlayer={() => {
+            setPlayerInitialViewMode('player');
+            setIsFullPlayerOpen(true);
+          }}
           onOpenQueue={() => setIsQueueOpen(true)}
-          onOpenLyrics={() => setIsFullPlayerOpen(true)}
+          onOpenLyrics={() => {
+            setPlayerInitialViewMode('lyrics');
+            setIsFullPlayerOpen(true);
+          }}
+          onOpenAddToPlaylist={() => handleOpenAddToPlaylist(currentTrack)}
           onSeek={handleSeek}
           seedColor={settings.seedColor}
         />
@@ -835,6 +1069,7 @@ export function App() {
           volume={volume}
           lyricsData={lyricsData}
           isLoadingLyrics={isLoadingLyrics}
+          initialViewMode={playerInitialViewMode}
           onClose={() => setIsFullPlayerOpen(false)}
           onTogglePlay={handleTogglePlay}
           onPrevTrack={handlePrevTrack}
@@ -853,6 +1088,8 @@ export function App() {
             setActiveTab('equalizer');
           }}
           onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+          onOpenAddToPlaylist={() => handleOpenAddToPlaylist(currentTrack)}
+          onOpenLyricsStudio={() => setIsAdminLyricsOpen(true)}
           seedColor={settings.seedColor}
         />
       )}
@@ -915,6 +1152,17 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Add To Playlist Modal */}
+      <AddToPlaylistModal
+        isOpen={isAddToPlaylistOpen}
+        onClose={() => setIsAddToPlaylistOpen(false)}
+        track={trackForPlaylist}
+        playlists={customPlaylists}
+        onAddToPlaylist={handleAddToPlaylist}
+        onCreatePlaylistWithTrack={handleCreatePlaylistWithTrack}
+        seedColor={settings.seedColor}
+      />
 
       {/* Up Next Queue Modal / Drawer */}
       {isQueueOpen && (
@@ -1039,14 +1287,14 @@ export function App() {
               <div className="p-3 rounded-2xl bg-neutral-950/60 border border-white/10 space-y-1">
                 <div className="font-bold text-white flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Eshu Music v5.2.8 Released</span>
+                  <span>Eshu Music v1.0.0 Released</span>
                 </div>
                 <p className="text-neutral-400 text-[11px] leading-relaxed">
-                  • Rebuilt with authentic Eshu Music UI & theme engine from Yugesh (<a href="https://github.com/yugesh" target="_blank" rel="noreferrer" className="text-white underline">@yugesh</a>).<br />
-                  • Added AutoEq Headphone profile calibration with Harman curves.<br />
-                  • Integrated 10-Band Graphic Equalizer DSP with Dynamic Bass Boost.<br />
-                  • Synced LRCLIB lyrics with AI subtitle translation.<br />
-                  • Support for global country charts and podcasts.
+                  • Rebuilt with authentic Eshu Music UI & theme engine.<br />
+                  • Direct YouTube Playlist & Link Importer without OAuth restrictions.<br />
+                  • Live synchronized karaoke lyrics with seamless exit / return.<br />
+                  • Add to Playlist quick modal directly from mini-player and fullscreen player.<br />
+                  • Accurate YouTube playback engine with HQ background audio support.
                 </p>
               </div>
             </div>
@@ -1061,6 +1309,35 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* YouTube Auth & Playlist Sync Modal */}
+      <YouTubeAuthModal
+        isOpen={isYouTubeModalOpen}
+        onClose={() => setIsYouTubeModalOpen(false)}
+        user={youtubeUser}
+        onLogin={handleYouTubeLogin}
+        onLogout={handleYouTubeLogout}
+        onSyncPlaylists={handleSyncYouTubePlaylists}
+        onDirectImportPlaylist={handleDirectImportPlaylist}
+        isSyncing={isSyncingYouTube}
+        syncStatus={youtubeSyncStatus}
+        seedColor={settings.seedColor}
+        importedPlaylistsCount={customPlaylists.length}
+      />
+
+      {/* Admin / Creator Lyrics Studio Modal */}
+      <AdminLyricsModal
+        isOpen={isAdminLyricsOpen}
+        onClose={() => setIsAdminLyricsOpen(false)}
+        currentTrack={currentTrack}
+        currentTime={currentTime}
+        duration={duration}
+        onSeek={handleSeek}
+        onLyricsSaved={(savedLyrics) => {
+          setLyricsData(savedLyrics);
+        }}
+        seedColor={settings.seedColor}
+      />
     </div>
   );
 }

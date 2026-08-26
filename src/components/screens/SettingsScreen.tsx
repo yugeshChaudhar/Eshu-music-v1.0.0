@@ -18,9 +18,13 @@ import {
   Disc3, 
   Check, 
   FileText,
-  Info
+  Info,
+  Youtube,
+  LogIn,
+  LogOut,
+  FolderSync
 } from 'lucide-react';
-import { EchoSettings, ThemeMode, EqualizerPreset } from '../../types';
+import { EchoSettings, ThemeMode, EqualizerPreset, YouTubeUserProfile } from '../../types';
 import { exportEchoBackup, importEchoBackup } from '../../services/echoStorage';
 
 interface SettingsScreenProps {
@@ -30,6 +34,11 @@ interface SettingsScreenProps {
   onResetStats: () => void;
   seedColor?: string;
   onOpenBackupModal?: () => void;
+  youtubeUser?: YouTubeUserProfile | null;
+  onOpenYouTubeAuth?: () => void;
+  onLogoutYouTube?: () => void;
+  onSyncYouTubePlaylists?: () => void;
+  isSyncingYouTube?: boolean;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
@@ -38,6 +47,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onClearCache,
   onResetStats,
   seedColor = '#FF5252',
+  youtubeUser = null,
+  onOpenYouTubeAuth,
+  onLogoutYouTube,
+  onSyncYouTubePlaylists,
+  isSyncingYouTube = false,
 }) => {
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
@@ -110,6 +124,83 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </p>
         </div>
       </div>
+
+      {/* YouTube Account & Library Sync Section */}
+      <section className="p-6 rounded-3xl bg-neutral-900/80 border border-white/10 shadow-xl space-y-4">
+        <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#FF0000] flex items-center justify-center shadow-lg">
+              <Youtube className="w-6 h-6 fill-white text-white" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <span>YouTube Account & Playlist Sync</span>
+                {youtubeUser && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
+                    Connected
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-neutral-400">
+                Log in to import your personal YouTube and YouTube Music playlists directly into your library.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {youtubeUser ? (
+          <div className="p-4 rounded-2xl bg-neutral-950/60 border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <img 
+                src={youtubeUser.picture} 
+                alt={youtubeUser.name} 
+                className="w-11 h-11 rounded-full border border-white/20 object-cover shadow-sm"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100';
+                }}
+              />
+              <div>
+                <h3 className="text-sm font-bold text-white">{youtubeUser.name}</h3>
+                <p className="text-xs text-neutral-400">{youtubeUser.email}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                onClick={onSyncYouTubePlaylists}
+                disabled={isSyncingYouTube}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs text-black transition-all active:scale-95 shadow-md disabled:opacity-50"
+                style={{ backgroundColor: seedColor }}
+              >
+                <FolderSync className={`w-3.5 h-3.5 ${isSyncingYouTube ? 'animate-spin' : ''}`} />
+                <span>{isSyncingYouTube ? 'Syncing...' : 'Sync Playlists'}</span>
+              </button>
+
+              <button
+                onClick={onLogoutYouTube}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-300 border border-white/10 text-xs font-semibold transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign out</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-neutral-950/60 border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="text-xs text-neutral-300">
+              Sign in with your Google account to authorize read-only access to your public and private YouTube playlists.
+            </div>
+
+            <button
+              onClick={onOpenYouTubeAuth}
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-xs sm:text-sm text-white bg-[#FF0000] hover:bg-[#E60000] transition-all active:scale-95 shadow-lg shadow-red-900/30 flex-shrink-0 w-full sm:w-auto justify-center"
+            >
+              <Youtube className="w-4 h-4 fill-white" />
+              <span>Connect YouTube</span>
+            </button>
+          </div>
+        )}
+      </section>
 
       {/* 1. Appearance & Themes */}
       <section className="p-6 rounded-3xl bg-neutral-900/80 border border-white/10 shadow-xl space-y-6">
@@ -375,12 +466,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       {/* 5. About Eshu Music & Credits */}
       <section className="p-6 rounded-3xl bg-neutral-900/80 border border-white/10 shadow-xl space-y-4">
         <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-          <div className="w-9 h-9 rounded-2xl bg-white/10 flex items-center justify-center">
-            <Info className="w-4 h-4 text-white" style={{ color: seedColor }} />
+          <div className="w-10 h-10 rounded-2xl overflow-hidden bg-neutral-900 border border-white/20 p-0.5 flex items-center justify-center shadow-md">
+            <img src="/eshu-logo.png" alt="Eshu Music" className="w-full h-full object-cover rounded-xl" />
           </div>
           <div>
             <h2 className="text-sm sm:text-base font-bold text-white">About Eshu Music</h2>
-            <p className="text-xs text-neutral-400">Eshu Music v5.2.8 • Free & Open Source Music Experience</p>
+            <p className="text-xs text-neutral-400">Eshu Music v1.0.0 • Free & Open Source Music Experience</p>
           </div>
         </div>
 

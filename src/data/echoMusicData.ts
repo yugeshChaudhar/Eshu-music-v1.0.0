@@ -234,7 +234,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
     flag: '🇮🇳',
     tracks: [
       {
-        id: 'kXYiU_JCYtU',
+        id: 'BddP6PYo2gs',
         title: 'Kesariya',
         artist: 'Arijit Singh, Pritam',
         album: 'Brahmastra',
@@ -243,7 +243,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
         views: '600M',
       },
       {
-        id: 'fJ9rUzIMcZQ',
+        id: 'ElZfdU54Cp8',
         title: 'Apna Bana Le',
         artist: 'Arijit Singh, Sachin-Jigar',
         album: 'Bhediya',
@@ -252,7 +252,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
         views: '450M',
       },
       {
-        id: '4NRXx6U8ABQ',
+        id: 'VuG7ge_8I88',
         title: 'Maan Meri Jaan',
         artist: 'King',
         album: 'Champagne Talk',
@@ -276,7 +276,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
         views: '6.2B',
       },
       {
-        id: 'fJ9rUzIMcZQ',
+        id: 'hLQl3WQQoQ0',
         title: 'Someone Like You',
         artist: 'Adele',
         album: '21',
@@ -291,7 +291,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
     flag: '🇯🇵',
     tracks: [
       {
-        id: '4NRXx6U8ABQ',
+        id: 'ZRtdQ81jPUQ',
         title: 'Idol (アイドル)',
         artist: 'YOASOBI',
         album: 'THE BOOK 3',
@@ -300,7 +300,7 @@ export const COUNTRY_CHARTS: Record<string, { name: string; flag: string; tracks
         views: '450M',
       },
       {
-        id: '60ItHLz5WEA',
+        id: 'kegoDbrmDYc',
         title: 'Night Dancer',
         artist: 'imase',
         album: 'POP CUBE',
@@ -550,7 +550,7 @@ export const ECHO_TOP_ARTISTS: Artist[] = [
     bio: 'Arijit Singh is an Indian playback singer and music composer. Known for his soulful and emotive vocal delivery, he is the recipient of numerous national awards.',
     topTracks: [
       {
-        id: 'kXYiU_JCYtU',
+        id: 'BddP6PYo2gs',
         title: 'Kesariya',
         artist: 'Arijit Singh, Pritam',
         album: 'Brahmastra',
@@ -559,13 +559,127 @@ export const ECHO_TOP_ARTISTS: Artist[] = [
         views: '600M',
       },
       {
-        id: 'fJ9rUzIMcZQ',
+        id: 'ElZfdU54Cp8',
         title: 'Apna Bana Le',
         artist: 'Arijit Singh, Sachin-Jigar',
         album: 'Bhediya',
         duration: 261,
         thumbnail: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=800&auto=format&fit=crop&q=80',
         views: '450M',
+      }
+    ],
+    albums: [],
+    singles: []
+  },
+  {
+    id: 'art-queen',
+    name: 'Queen',
+    thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+    subscribers: '17.9M Subscribers',
+    monthlyListeners: '48M Monthly Listeners',
+    verified: true,
+    bio: 'Queen are a British rock band formed in London in 1970 by Freddie Mercury, Brian May, Roger Taylor and John Deacon. Their classic works include Bohemian Rhapsody, We Will Rock You, and Another One Bites The Dust.',
+    topTracks: [
+      {
+        id: 'fJ9rUzIMcZQ',
+        title: 'Bohemian Rhapsody',
+        artist: 'Queen',
+        album: 'A Night at the Opera',
+        duration: 359,
+        thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+        views: '1.7B',
+        category: 'Rock Classics',
+      },
+      {
+        id: 'HgzGwKwLmgM',
+        title: 'Don\'t Stop Me Now',
+        artist: 'Queen',
+        album: 'Jazz',
+        duration: 210,
+        thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&auto=format&fit=crop&q=80',
+        views: '920M',
+        category: 'Rock Classics',
+      },
+      {
+        id: 'rY0WxgSXdEE',
+        title: 'Another One Bites the Dust',
+        artist: 'Queen',
+        album: 'The Game',
+        duration: 215,
+        thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=80',
+        views: '650M',
+        category: 'Rock Classics',
+      },
+      {
+        id: '-tJYN-eG1zk',
+        title: 'We Will Rock You',
+        artist: 'Queen',
+        album: 'News of the World',
+        duration: 135,
+        thumbnail: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop&q=80',
+        views: '780M',
+        category: 'Rock Classics',
+      },
+      {
+        id: '04854XqcfCY',
+        title: 'We Are The Champions',
+        artist: 'Queen',
+        album: 'News of the World',
+        duration: 180,
+        thumbnail: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&auto=format&fit=crop&q=80',
+        views: '540M',
+        category: 'Rock Classics',
+      },
+      {
+        id: 'a01QQZyl-_I',
+        title: 'Under Pressure',
+        artist: 'Queen & David Bowie',
+        album: 'Hot Space',
+        duration: 245,
+        thumbnail: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=800&auto=format&fit=crop&q=80',
+        views: '410M',
+        category: 'Rock Classics',
+      }
+    ],
+    albums: [
+      {
+        id: 'alb-night-at-opera',
+        title: 'A Night at the Opera',
+        year: '1975',
+        thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+        trackCount: 12,
+      }
+    ],
+    singles: []
+  },
+  {
+    id: 'art-linkin-park',
+    name: 'Linkin Park',
+    thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&auto=format&fit=crop&q=80',
+    subscribers: '21.5M Subscribers',
+    monthlyListeners: '42M Monthly Listeners',
+    verified: true,
+    bio: 'Linkin Park is an American rock band from Agoura Hills, California. Their music spans nu metal, alternative rock, and electronic rock.',
+    topTracks: [
+      {
+        id: 'kXYiU_JCYtU',
+        title: 'Numb',
+        artist: 'Linkin Park',
+        album: 'Meteora',
+        duration: 187,
+        thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&auto=format&fit=crop&q=80',
+        views: '2.3B',
+        category: 'Alternative Rock',
+      },
+      {
+        id: 'eVTXPUF4Oz4',
+        title: 'In The End',
+        artist: 'Linkin Park',
+        album: 'Hybrid Theory',
+        duration: 216,
+        thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=80',
+        views: '1.8B',
+        category: 'Alternative Rock',
       }
     ],
     albums: [],

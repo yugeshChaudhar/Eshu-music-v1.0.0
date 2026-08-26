@@ -46,8 +46,19 @@ export interface Playlist {
   tracks: Track[];
   author?: string;
   isCustom?: boolean;
+  isYouTubeImported?: boolean;
   createdAt?: number;
   color?: string;
+}
+
+export interface YouTubeUserProfile {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+  accessToken?: string;
+  expiresAt?: number;
+  playlistsCount?: number;
 }
 
 export interface Artist {
@@ -199,18 +210,40 @@ export interface TrackMetadata {
 }
 
 export interface LyricsLine {
-  timeMs: number;
+  time?: number; // timestamp in seconds (e.g. 5.2)
+  timeMs: number; // timestamp in milliseconds (e.g. 5200)
   text: string;
   translation?: string;
 }
 
+export interface LyricsRecord {
+  id: string;
+  songId?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  language?: 'Nepali' | 'English' | 'Hindi' | 'Other' | string;
+  plainLyrics?: string;
+  syncedLyrics?: string;
+  source: 'ESHU Database' | 'LRCLIB' | 'Gemini AI' | 'Admin Upload' | 'Manual' | string;
+  createdAt: number | string;
+  updatedAt: number | string;
+}
+
 export interface LyricsData {
+  id?: string;
+  songId?: string;
   synced: boolean;
   lines: LyricsLine[];
   plainLyrics?: string;
-  source: 'LRCLIB' | 'SimpMusic' | 'YouTube' | 'None';
+  syncedLyrics?: string;
+  source?: string;
+  language?: string;
   trackName?: string;
   artistName?: string;
+  album?: string;
+  isCustom?: boolean;
+  unavailable?: boolean;
 }
 
 export interface SleepTimerState {
