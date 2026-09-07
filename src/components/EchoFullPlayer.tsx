@@ -19,8 +19,7 @@ import {
   Sparkles, 
   Video, 
   Image as ImageIcon,
-  Film,
-  Activity,
+  AudioWaveform,
   ShieldCheck,
   Languages,
   Loader2,
@@ -28,7 +27,9 @@ import {
   X,
   Plus,
   Edit3,
-  FileText
+  FileText,
+  Timer,
+  RotateCcw
 } from 'lucide-react';
 import { Track, PlayerViewMode, LyricsData } from '../types';
 import { MusicReactiveVisualizer } from './MusicReactiveVisualizer';
@@ -37,6 +38,13 @@ import {
   setSavedPlayerView, 
   updatePlayerActivityTimestamp 
 } from '../services/playerViewPreference';
+import { 
+  getLyricOffset, 
+  adjustLyricOffset, 
+  resetLyricOffset, 
+  getEffectiveActiveLyricIndex, 
+  getSeekTimeForLine 
+} from '../services/lyricSyncService';
 
 interface EchoFullPlayerProps {
   currentTrack: Track;
@@ -133,8 +141,14 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   };
   const [showTranslation, setShowTranslation] = useState<boolean>(true);
   const [lyricsViewType, setLyricsViewType] = useState<'synced' | 'plain'>('synced');
+  const [lyricOffsetMs, setLyricOffsetMs] = useState<number>(() => getLyricOffset(currentTrack.id));
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const activeLyricRef = useRef<HTMLDivElement>(null);
+
+  // Sync lyric timing offset when track changes
+  useEffect(() => {
+    setLyricOffsetMs(getLyricOffset(currentTrack.id));
+  }, [currentTrack.id]);
 
   // Gesture & Smooth Transition References
   const containerRef = useRef<HTMLDivElement>(null);
@@ -340,10 +354,10 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Find active synchronized lyric line
-  const currentMs = currentTime * 1000;
+  // Find active synchronized lyric line with manual timing offset calibration
+  const effectiveCurrentMs = Math.max(0, (currentTime * 1000) - lyricOffsetMs);
   const activeLineIndex = lyricsData?.lines?.length
-    ? lyricsData.lines.reduce((acc, line, idx) => (line.timeMs <= currentMs ? idx : acc), -1)
+    ? getEffectiveActiveLyricIndex(currentTime, lyricOffsetMs, lyricsData.lines)
     : -1;
 
   // Auto-scroll lyrics smoothly to active line
@@ -398,8 +412,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-900/80 border border-white/10 backdrop-blur-xl">
           {[
             { id: 'artwork' as PlayerViewMode, label: 'Artwork', icon: ImageIcon },
-            { id: 'canvas' as PlayerViewMode, label: 'Canvas', icon: Film },
-            { id: 'visualizer' as PlayerViewMode, label: 'Visualizer', icon: Activity },
+            { id: 'visualizer' as PlayerViewMode, label: 'Visualizer', icon: AudioWaveform },
             { id: 'vinyl' as PlayerViewMode, label: 'Vinyl', icon: Disc3 },
             { id: 'lyrics' as PlayerViewMode, label: 'Lyrics', icon: Mic2 },
           ].map((mode) => {
@@ -465,27 +478,9 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           </div>
         )}
 
-        {/* VIEW 2: Spotify Canvas Video Loop */}
-        {viewMode === 'canvas' && (
-          <div className="relative aspect-[9/16] h-full max-h-[460px] rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-neutral-950 flex items-center justify-center animate-fadeIn">
-            <video
-              src={currentTrack.canvasVideoUrl || 'https://assets.mixkit.co/videos/preview/mixkit-vintage-cassette-tape-spinning-41470-large.mp4'}
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-[10px] font-bold text-white flex items-center gap-1.5 border border-white/10">
-              <Film className="w-3 h-3 text-[#FF5252]" style={{ color: seedColor }} />
-              <span>Canvas Visualizer</span>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 3: Real Music-Reactive Visualizer Mode */}
+        {/* VIEW 2: Music-Reactive Visualizer Mode */}
         {viewMode === 'visualizer' && (
-          <div className="w-full h-full max-h-[460px] aspect-square rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-neutral-950/80 flex items-center justify-center animate-fadeIn relative">
+          <div className="w-full h-full max-h-[460px] aspect-square rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-neutral-950/85 flex items-center justify-center animate-fadeIn relative">
             <MusicReactiveVisualizer
               currentTrack={currentTrack}
               isPlaying={isPlaying}
@@ -498,7 +493,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           </div>
         )}
 
-        {/* VIEW 4: Vinyl Turntable Mode */}
+        {/* VIEW 3: Vinyl Turntable Mode */}
         {viewMode === 'vinyl' && (
           <div className="flex items-center justify-center animate-fadeIn">
             <div 
@@ -592,6 +587,56 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
               </div>
             </div>
 
+            {/* Lyric Sync Offset Manual Calibration Toolbar */}
+            {lyricsData?.lines && lyricsData.lines.length > 0 && lyricsViewType === 'synced' && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-black/40 border border-white/5 text-xs text-neutral-300 gap-2 mb-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Timer className="w-3.5 h-3.5 text-[#8ECAE6] flex-shrink-0" />
+                  <span className="text-[11px] font-medium text-neutral-400 truncate">
+                    Sync Offset:
+                  </span>
+                  <span className={`text-[11px] font-bold ${lyricOffsetMs !== 0 ? 'text-[#FFFF00]' : 'text-neutral-300'}`}>
+                    {lyricOffsetMs === 0 ? '0.0s (In Sync)' : `${lyricOffsetMs > 0 ? `+${(lyricOffsetMs / 1000).toFixed(1)}s (Delayed)` : `${(lyricOffsetMs / 1000).toFixed(1)}s (Advanced)`}`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      const next = adjustLyricOffset(currentTrack.id, 500);
+                      setLyricOffsetMs(next);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-[10px] font-bold text-white transition-colors"
+                    title="Lyrics appear before audio? Click +0.5s to delay lyrics"
+                  >
+                    +0.5s Delay
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = adjustLyricOffset(currentTrack.id, -500);
+                      setLyricOffsetMs(next);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-[10px] font-bold text-white transition-colors"
+                    title="Lyrics appear after audio? Click -0.5s to advance lyrics"
+                  >
+                    -0.5s Advance
+                  </button>
+                  {lyricOffsetMs !== 0 && (
+                    <button
+                      onClick={() => {
+                        resetLyricOffset(currentTrack.id);
+                        setLyricOffsetMs(0);
+                      }}
+                      className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                      title="Reset sync offset to 0"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Lyrics Content Display */}
             <div 
               ref={lyricsContainerRef}
@@ -632,28 +677,43 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
                   ))}
                 </div>
               ) : (
-                lyricsData.lines.map((line, idx) => {
-                  const isActive = idx === activeLineIndex;
-                  return (
-                    <div
-                      key={idx}
-                      ref={isActive ? activeLyricRef : null}
-                      onClick={() => onSeek(line.timeMs / 1000)}
-                      className={`cursor-pointer transition-all duration-300 py-1.5 px-3 rounded-xl ${
-                        isActive
-                          ? 'scale-105 font-black text-[#FFFF00] text-xl sm:text-2xl drop-shadow-md bg-white/5'
-                          : 'text-neutral-400 hover:text-neutral-200 text-sm sm:text-base font-medium opacity-60 hover:opacity-100'
-                      }`}
-                    >
-                      <p className="leading-snug">{line.text}</p>
-                      {showTranslation && line.translation && (
-                        <p className="text-xs font-semibold text-neutral-300 mt-1">
-                          {line.translation}
-                        </p>
-                      )}
+                <>
+                  {/* Instrumental Lead-In Indicator when song is playing before first vocal */}
+                  {activeLineIndex === -1 && lyricsData.lines.length > 0 && effectiveCurrentMs < lyricsData.lines[0].timeMs && (
+                    <div className="py-6 px-4 flex flex-col items-center justify-center gap-2 text-neutral-400 animate-pulse">
+                      <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-[#8ECAE6]">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8ECAE6] opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-[#8ECAE6]"></span>
+                        </span>
+                        <span>♪ Instrumental Intro • Singing starts soon ♪</span>
+                      </div>
                     </div>
-                  );
-                })
+                  )}
+
+                  {lyricsData.lines.map((line, idx) => {
+                    const isActive = idx === activeLineIndex;
+                    return (
+                      <div
+                        key={idx}
+                        ref={isActive ? activeLyricRef : null}
+                        onClick={() => onSeek(getSeekTimeForLine(line.timeMs, lyricOffsetMs))}
+                        className={`cursor-pointer transition-all duration-300 py-1.5 px-3 rounded-xl ${
+                          isActive
+                            ? 'scale-105 font-black text-[#FFFF00] text-xl sm:text-2xl drop-shadow-md bg-white/5'
+                            : 'text-neutral-400 hover:text-neutral-200 text-sm sm:text-base font-medium opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <p className="leading-snug">{line.text}</p>
+                        {showTranslation && line.translation && (
+                          <p className="text-xs font-semibold text-neutral-300 mt-1">
+                            {line.translation}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </div>
           </div>

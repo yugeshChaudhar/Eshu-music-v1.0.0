@@ -14,6 +14,15 @@ const STATS_KEY = 'echo_music_stats_v2';
 const SETTINGS_KEY = 'echo_music_settings_v2';
 const HISTORY_KEY = 'echo_music_history_v2';
 const ARTISTS_KEY = 'echo_music_followed_artists_v2';
+const LAST_PLAYBACK_KEY = 'echo_music_last_playback_v2';
+
+export interface LastPlaybackState {
+  track: Track;
+  queue: Track[];
+  queueIndex: number;
+  currentTime: number;
+  duration: number;
+}
 
 export const DEFAULT_ECHO_SETTINGS: EchoSettings = {
   audioQuality: 'high-256',
@@ -410,3 +419,51 @@ export function importEchoBackup(jsonString: string): { success: boolean; messag
     };
   }
 }
+
+// 7. Last Playback State Persistence (Restores last played track in miniplayer upon app reopening)
+export function saveLastPlaybackState(state: LastPlaybackState): void {
+  try {
+    if (!state || !state.track || isDomOrEvent(state.track)) return;
+    const cleanTrack = sanitizeTrack(state.track);
+    const cleanQueue = Array.isArray(state.queue) && state.queue.length > 0
+      ? state.queue.filter((t: any) => t && !isDomOrEvent(t)).map(sanitizeTrack)
+      : [cleanTrack];
+    
+    const payload = {
+      track: cleanTrack,
+      queue: cleanQueue,
+      queueIndex: typeof state.queueIndex === 'number' && !isNaN(state.queueIndex) ? state.queueIndex : 0,
+      currentTime: typeof state.currentTime === 'number' && !isNaN(state.currentTime) ? state.currentTime : 0,
+      duration: typeof state.duration === 'number' && !isNaN(state.duration) ? state.duration : cleanTrack.duration || 200,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(LAST_PLAYBACK_KEY, safeJsonStringify(payload, '{}'));
+  } catch (err) {
+    console.warn('Failed to save last playback state:', err);
+  }
+}
+
+export function getLastPlaybackState(): LastPlaybackState | null {
+  try {
+    const raw = localStorage.getItem(LAST_PLAYBACK_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.track || !parsed.track.id) return null;
+
+    const cleanTrack = sanitizeTrack(parsed.track);
+    const cleanQueue = Array.isArray(parsed.queue) && parsed.queue.length > 0
+      ? parsed.queue.filter((t: any) => t && !isDomOrEvent(t)).map(sanitizeTrack)
+      : [cleanTrack];
+
+    return {
+      track: cleanTrack,
+      queue: cleanQueue,
+      queueIndex: typeof parsed.queueIndex === 'number' && !isNaN(parsed.queueIndex) ? parsed.queueIndex : 0,
+      currentTime: typeof parsed.currentTime === 'number' && !isNaN(parsed.currentTime) ? parsed.currentTime : 0,
+      duration: typeof parsed.duration === 'number' && !isNaN(parsed.duration) ? parsed.duration : cleanTrack.duration || 200,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+

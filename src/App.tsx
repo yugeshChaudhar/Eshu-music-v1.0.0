@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Track, 
   Playlist, 
@@ -37,9 +37,12 @@ import {
   getListeningHistory,
   sanitizeTrack,
   isDomOrEvent,
+  saveLastPlaybackState,
+  getLastPlaybackState,
   DEFAULT_ECHO_SETTINGS 
 } from './services/echoStorage';
 import { fetchLyricsForTrack } from './services/lyricsService';
+import { getAutoActiveLyricIndex } from './services/lyricSyncService';
 import { resolveRealVideoId } from './services/universalSearchService';
 import { 
   getStoredYouTubeUser, 
@@ -96,29 +99,122 @@ import {
 export function App() {
   const screenSize = useScreenSize();
 
-  // Navigation & Screen State
+  // Load persisted playback state from previous session (if any)
+  const initialPlayback = useMemo(() => getLastPlaybackState(), []);
+
+  // Navigation & Screen State - always starts from the home screen
   const [activeTab, setActiveTab] = useState<TabType>('home');
 
-  // Player State
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(ECHO_QUICK_PICKS[0]);
+  // Player State - restores the last song played before closing the application
+  const [currentTrack, setCurrentTrack] = useState<Track | null>(() => {
+    return initialPlayback?.track || ECHO_QUICK_PICKS[0];
+  });
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBuffering, setIsBuffering] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(ECHO_QUICK_PICKS[0].duration || 200);
+  const [currentTime, setCurrentTime] = useState<number>(() => {
+    return initialPlayback?.currentTime || 0;
+  });
+  const [duration, setDuration] = useState<number>(() => {
+    return initialPlayback?.duration || initialPlayback?.track?.duration || ECHO_QUICK_PICKS[0].duration || 200;
+  });
   const [volume, setVolume] = useState<number>(85);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
   const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
+  // Starts with full player closed so the Home Screen is open, but the miniplayer displays the last played song
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState<boolean>(false);
-  const [playQueue, setPlayQueue] = useState<Track[]>(ECHO_QUICK_PICKS);
-  const [queueIndex, setQueueIndex] = useState<number>(0);
+  const [playQueue, setPlayQueue] = useState<Track[]>(() => {
+    return initialPlayback?.queue && initialPlayback.queue.length > 0
+      ? initialPlayback.queue
+      : ECHO_QUICK_PICKS;
+  });
+  const [queueIndex, setQueueIndex] = useState<number>(() => {
+    return typeof initialPlayback?.queueIndex === 'number' ? initialPlayback.queueIndex : 0;
+  });
 
   // Storage & Collections State
-  const [favorites, setFavorites] = useState<Track[]>([]);
-  const [customPlaylists, setCustomPlaylists] = useState<Playlist[]>([]);
-  const [followedArtists, setFollowedArtists] = useState<string[]>([]);
-  const [settings, setSettings] = useState<EchoSettings>(DEFAULT_ECHO_SETTINGS);
-  const [userStats, setUserStats] = useState<UserStats>(getUserStats());
-  const [historyList, setHistoryList] = useState<{ track: Track; timestamp: number }[]>([]);
+  const [favorites, setFavorites] = useState<Track[]>(() => getFavoriteTracks());
+  const [customPlaylists, setCustomPlaylists] = useState<Playlist[]>(() => getCustomPlaylists());
+  const [followedArtists, setFollowedArtists] = useState<string[]>(() => getFollowedArtists());
+  const [settings, setSettings] = useState<EchoSettings>(() => getSavedSettings());
+  const [userStats, setUserStats] = useState<UserStats>(() => getUserStats());
+  const [historyList, setHistoryList] = useState<{ track: Track; timestamp: number }[]>(() => getListeningHistory());
+
+  // Dynamic references to prevent stale closures during playback transitions & YouTube events
+  const playQueueRef = useRef<Track[]>(playQueue);
+  const queueIndexRef = useRef<number>(queueIndex);
+  const repeatModeRef = useRef<'off' | 'all' | 'one'>(repeatMode);
+  const isShuffleRef = useRef<boolean>(isShuffle);
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  const currentTrackRef = useRef<Track | null>(currentTrack);
+  const currentTimeRef = useRef<number>(currentTime);
+
+  useEffect(() => {
+    playQueueRef.current = playQueue;
+  }, [playQueue]);
+
+  useEffect(() => {
+    queueIndexRef.current = queueIndex;
+  }, [queueIndex]);
+
+  useEffect(() => {
+    repeatModeRef.current = repeatMode;
+  }, [repeatMode]);
+
+  useEffect(() => {
+    isShuffleRef.current = isShuffle;
+  }, [isShuffle]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  // Handler refs to prevent stale closure in YouTube iframe API and MediaSession callbacks
+  const handleTrackEndRef = useRef<() => void>(() => {});
+  const handleNextTrackRef = useRef<() => void>(() => {});
+  const handlePrevTrackRef = useRef<() => void>(() => {});
+  const handleTogglePlayRef = useRef<() => void>(() => {});
+
+  // Persist playback state so reopening the app restores the last played song into the miniplayer
+  useEffect(() => {
+    if (currentTrack) {
+      saveLastPlaybackState({
+        track: currentTrack,
+        queue: playQueue,
+        queueIndex,
+        currentTime: currentTimeRef.current,
+        duration,
+      });
+    }
+  }, [currentTrack?.id, playQueue, queueIndex, duration]);
+
+  // Also persist on page unload or mobile visibility change
+  useEffect(() => {
+    const handleSaveOnExit = () => {
+      if (currentTrackRef.current) {
+        saveLastPlaybackState({
+          track: currentTrackRef.current,
+          queue: playQueueRef.current,
+          queueIndex: queueIndexRef.current,
+          currentTime: currentTimeRef.current,
+          duration: currentTrackRef.current.duration || 200,
+        });
+      }
+    };
+    window.addEventListener('beforeunload', handleSaveOnExit);
+    window.addEventListener('pagehide', handleSaveOnExit);
+    return () => {
+      window.removeEventListener('beforeunload', handleSaveOnExit);
+      window.removeEventListener('pagehide', handleSaveOnExit);
+    };
+  }, []);
 
   // Lyrics State
   const [lyricsData, setLyricsData] = useState<LyricsData | null>(null);
@@ -135,7 +231,9 @@ export function App() {
   const [newPlaylistDesc, setNewPlaylistDesc] = useState<string>('');
   const [isAddToPlaylistOpen, setIsAddToPlaylistOpen] = useState<boolean>(false);
   const [trackForPlaylist, setTrackForPlaylist] = useState<Track | null>(null);
-  const [playerInitialViewMode, setPlayerInitialViewMode] = useState<PlayerViewMode>('artwork');
+  const [playerInitialViewMode, setPlayerInitialViewMode] = useState<PlayerViewMode>(() => 
+    getEffectivePlayerView(ECHO_QUICK_PICKS[0]?.id)
+  );
   const [isQueueOpen, setIsQueueOpen] = useState<boolean>(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState<boolean>(false);
   const [isAdminLyricsOpen, setIsAdminLyricsOpen] = useState<boolean>(false);
@@ -325,6 +423,14 @@ export function App() {
               if (event.data === 1) {
                 setIsPlaying(true);
                 setIsBuffering(false);
+                try {
+                  const actualSecs = event.target.getCurrentTime();
+                  if (typeof actualSecs === 'number' && !isNaN(actualSecs)) {
+                    setCurrentTime(actualSecs);
+                  }
+                } catch {
+                  // Ignore
+                }
                 setDuration(event.target.getDuration() || currentTrack?.duration || 200);
               } else if (event.data === 2) {
                 setIsPlaying(false);
@@ -332,14 +438,15 @@ export function App() {
               } else if (event.data === 3) {
                 setIsBuffering(true);
               } else if (event.data === 0) {
-                handleTrackEnd();
+                // Song ended - advance to next queued song
+                handleTrackEndRef.current();
               }
             },
             onError: (err: any) => {
               console.warn('YouTube Player Engine Error:', err);
-              // Auto-advance if error occurs
+              // Auto-advance to next queued song on error
               setTimeout(() => {
-                handleNextTrack();
+                handleNextTrackRef.current();
               }, 1200);
             },
           },
@@ -370,7 +477,7 @@ export function App() {
     };
   }, []);
 
-  // 3. Playback Clock & Progress Tracker
+  // 3. Playback Clock & Progress Tracker (100ms precision for silky-smooth lyric synchronization)
   useEffect(() => {
     let timer: any;
     if (isPlaying) {
@@ -379,14 +486,21 @@ export function App() {
         updatePlayerActivityTimestamp();
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
           const curr = ytPlayerRef.current.getCurrentTime();
-          setCurrentTime(curr);
-        } else {
-          setCurrentTime((prev) => prev + 1);
+          if (typeof curr === 'number' && !isNaN(curr) && curr >= 0) {
+            setCurrentTime(curr);
+            currentTimeRef.current = curr;
+          }
+        } else if (!isBuffering) {
+          setCurrentTime((prev) => {
+            const next = +(prev + 0.1).toFixed(2);
+            currentTimeRef.current = next;
+            return next;
+          });
         }
-      }, 500);
+      }, 100);
     }
     return () => clearInterval(timer);
-  }, [isPlaying]);
+  }, [isPlaying, isBuffering]);
 
   // 4. Fetch Synchronized Lyrics when Track Changes (ESHU DB -> LRCLIB Pipeline)
   useEffect(() => {
@@ -451,14 +565,26 @@ export function App() {
     }
 
     setCurrentTrack(track);
+    currentTrackRef.current = track;
     setCurrentTime(0);
+    currentTimeRef.current = 0;
     setDuration(track.duration || 200);
 
     if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
       const cleanQueue = newQueue.filter((t) => t && !isDomOrEvent(t)).map(sanitizeTrack);
       setPlayQueue(cleanQueue);
+      playQueueRef.current = cleanQueue;
       const idx = cleanQueue.findIndex((t) => t.id === track.id);
-      setQueueIndex(idx >= 0 ? idx : 0);
+      const targetIdx = idx >= 0 ? idx : 0;
+      setQueueIndex(targetIdx);
+      queueIndexRef.current = targetIdx;
+    } else {
+      const currentQ = playQueueRef.current;
+      const idx = currentQ.findIndex((t) => t.id === track.id);
+      if (idx >= 0) {
+        setQueueIndex(idx);
+        queueIndexRef.current = idx;
+      }
     }
 
     let actualVideoId = track.id;
@@ -472,6 +598,7 @@ export function App() {
       }
     }
 
+    setIsBuffering(true);
     if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
       try {
         ytPlayerRef.current.loadVideoById({
@@ -494,10 +621,10 @@ export function App() {
       isPlaying: true,
       currentTime: 0,
       duration: track.duration || 200,
-      onPlay: () => handleTogglePlay(),
-      onPause: () => handleTogglePlay(),
-      onNext: () => handleNextTrack(),
-      onPrev: () => handlePrevTrack(),
+      onPlay: () => handleTogglePlayRef.current(),
+      onPause: () => handleTogglePlayRef.current(),
+      onNext: () => handleNextTrackRef.current(),
+      onPrev: () => handlePrevTrackRef.current(),
       onSeek: (sec) => handleSeek(sec),
     });
   };
@@ -511,43 +638,76 @@ export function App() {
       setIsPlaying(false);
     } else {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
+        const state = typeof ytPlayerRef.current.getPlayerState === 'function' ? ytPlayerRef.current.getPlayerState() : -1;
+        // If unstarted (-1), cued (5), or ended (0), load and start song
+        if (state === -1 || state === 5 || state === 0) {
+          if (currentTrack) {
+            handlePlayTrack(currentTrack);
+            return;
+          }
+        }
         ytPlayerRef.current.playVideo();
+      } else if (currentTrack) {
+        handlePlayTrack(currentTrack);
+        return;
       }
       setIsPlaying(true);
     }
   };
 
   const handleNextTrack = () => {
-    if (playQueue.length === 0) return;
-    let nextIdx = (queueIndex + 1) % playQueue.length;
-    if (isShuffle) {
-      nextIdx = Math.floor(Math.random() * playQueue.length);
+    const queue = playQueueRef.current;
+    if (!queue || queue.length === 0) return;
+    let nextIdx = (queueIndexRef.current + 1) % queue.length;
+    if (isShuffleRef.current) {
+      if (queue.length > 1) {
+        do {
+          nextIdx = Math.floor(Math.random() * queue.length);
+        } while (nextIdx === queueIndexRef.current && queue.length > 1);
+      }
     }
+    queueIndexRef.current = nextIdx;
     setQueueIndex(nextIdx);
-    handlePlayTrack(playQueue[nextIdx]);
+    const nextSong = queue[nextIdx];
+    if (nextSong) {
+      handlePlayTrack(nextSong);
+    }
   };
 
   const handlePrevTrack = () => {
-    if (playQueue.length === 0) return;
-    const prevIdx = (queueIndex - 1 + playQueue.length) % playQueue.length;
+    const queue = playQueueRef.current;
+    if (!queue || queue.length === 0) return;
+    const prevIdx = (queueIndexRef.current - 1 + queue.length) % queue.length;
+    queueIndexRef.current = prevIdx;
     setQueueIndex(prevIdx);
-    handlePlayTrack(playQueue[prevIdx]);
+    const prevSong = queue[prevIdx];
+    if (prevSong) {
+      handlePlayTrack(prevSong);
+    }
   };
 
   const handleTrackEnd = () => {
-    if (repeatMode === 'one') {
+    if (repeatModeRef.current === 'one') {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
         ytPlayerRef.current.seekTo(0);
         ytPlayerRef.current.playVideo();
       }
       setCurrentTime(0);
+      currentTimeRef.current = 0;
+      setIsPlaying(true);
     } else {
       handleNextTrack();
     }
   };
 
+  handleTrackEndRef.current = handleTrackEnd;
+  handleNextTrackRef.current = handleNextTrack;
+  handlePrevTrackRef.current = handlePrevTrack;
+  handleTogglePlayRef.current = handleTogglePlay;
+
   const handleSeek = (seconds: number) => {
     setCurrentTime(seconds);
+    currentTimeRef.current = seconds;
     if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
       ytPlayerRef.current.seekTo(seconds, true);
     }
@@ -663,10 +823,12 @@ export function App() {
   const isCurrentFavorite = currentTrack ? favoriteSet.has(currentTrack.id) : false;
 
   // Active synced lyric line snippet for miniplayer
-  const currentMs = currentTime * 1000;
-  const activeLyric = lyricsData?.lines?.findLast
-    ? lyricsData.lines.findLast((l) => l.timeMs <= currentMs)?.text
-    : lyricsData?.lines?.filter((l) => l.timeMs <= currentMs).pop()?.text;
+  const activeLyricIdx = lyricsData?.lines?.length
+    ? getAutoActiveLyricIndex(currentTime, currentTrack?.id, lyricsData.lines)
+    : -1;
+  const activeLyric = activeLyricIdx >= 0 && lyricsData?.lines
+    ? lyricsData.lines[activeLyricIdx]?.text
+    : undefined;
 
   return (
     <div className={`min-h-screen text-white flex flex-col font-sans selection:bg-[#FF5252] selection:text-white ${
@@ -1192,9 +1354,30 @@ export function App() {
                   <ListMusic className="w-5 h-5 text-[#FF5252]" style={{ color: settings.seedColor }} />
                   <h3 className="font-bold text-base text-white">Up Next Queue ({playQueue.length})</h3>
                 </div>
-                <button onClick={() => setIsQueueOpen(false)} className="p-1 text-neutral-400 hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {playQueue.length > 1 && (
+                    <button
+                      onClick={() => {
+                        const current = playQueue[queueIndex] || currentTrack;
+                        const others = playQueue.filter((_, i) => i !== queueIndex);
+                        const shuffled = [...others].sort(() => Math.random() - 0.5);
+                        const newQ = current ? [current, ...shuffled] : shuffled;
+                        setPlayQueue(newQ);
+                        playQueueRef.current = newQ;
+                        setQueueIndex(0);
+                        queueIndexRef.current = 0;
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Randomize upcoming queue"
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                      <span>Randomize</span>
+                    </button>
+                  )}
+                  <button onClick={() => setIsQueueOpen(false)} className="p-1 text-neutral-400 hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-y-auto max-h-[60vh] space-y-2 pr-1 custom-scrollbar">

@@ -390,20 +390,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             style={{ accentColor: seedColor }}
           />
         </div>
-
-        <div className="p-4 rounded-2xl bg-neutral-950/60 border border-white/10 flex items-center justify-between">
-          <div>
-            <h4 className="text-xs font-bold text-white">Spotify Canvas Video Visualizations</h4>
-            <p className="text-[11px] text-neutral-400">Render looping ambient artwork video clips during playback</p>
-          </div>
-          <input
-            type="checkbox"
-            checked={settings.spotifyCanvasEnabled ?? true}
-            onChange={(e) => onUpdateSettings({ ...settings, spotifyCanvasEnabled: e.target.checked })}
-            className="w-5 h-5 rounded cursor-pointer"
-            style={{ accentColor: seedColor }}
-          />
-        </div>
       </section>
 
       {/* 4. Backup, Restore & Migration */}

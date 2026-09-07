@@ -23,8 +23,17 @@ import {
   Sparkles,
   Check,
   Languages,
-  Plus
+  Plus,
+  Timer,
+  RotateCcw
 } from 'lucide-react';
+import { 
+  getLyricOffset, 
+  adjustLyricOffset, 
+  resetLyricOffset, 
+  getEffectiveActiveLyricIndex, 
+  getSeekTimeForLine 
+} from '../services/lyricSyncService';
 
 interface SimpNowPlayingModalProps {
   isOpen: boolean;
@@ -115,17 +124,19 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
   const [showEqModal, setShowEqModal] = useState(false);
   const [showSleepTimerModal, setShowSleepTimerModal] = useState(false);
   const [showSpeedModal, setShowSpeedModal] = useState(false);
+  const [lyricOffsetMs, setLyricOffsetMs] = useState<number>(() => getLyricOffset(currentTrack?.id));
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll synchronized lyrics as audio plays
-  const currentMs = currentTime * 1000;
-  const activeLyricIndex = lyricsData?.lines?.findIndex((line, i, arr) => {
-    const nextLine = arr[i + 1];
-    if (nextLine) {
-      return currentMs >= line.timeMs && currentMs < nextLine.timeMs;
-    }
-    return currentMs >= line.timeMs;
-  }) ?? -1;
+  // Sync lyric timing offset when track changes
+  useEffect(() => {
+    setLyricOffsetMs(getLyricOffset(currentTrack?.id));
+  }, [currentTrack?.id]);
+
+  // Auto-scroll synchronized lyrics as audio plays with manual timing calibration
+  const effectiveCurrentMs = Math.max(0, (currentTime * 1000) - lyricOffsetMs);
+  const activeLyricIndex = lyricsData?.lines?.length
+    ? getEffectiveActiveLyricIndex(currentTime, lyricOffsetMs, lyricsData.lines)
+    : -1;
 
   useEffect(() => {
     if (viewMode === 'lyrics' && lyricsContainerRef.current && activeLyricIndex >= 0) {
@@ -359,6 +370,62 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
               </div>
             </div>
 
+            {/* Lyric Sync Offset Manual Calibration Toolbar */}
+            {lyricsData?.lines && lyricsData.lines.length > 0 && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-black/40 border border-white/5 text-xs text-neutral-300 gap-2 mb-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Timer className="w-3.5 h-3.5 text-[#8ECAE6] flex-shrink-0" />
+                  <span className="text-[11px] font-medium text-neutral-400 truncate">
+                    Sync Timing:
+                  </span>
+                  <span className={`text-[11px] font-bold ${lyricOffsetMs !== 0 ? 'text-[#FFFF00]' : 'text-neutral-300'}`}>
+                    {lyricOffsetMs === 0 ? '0.0s (Normal)' : `${lyricOffsetMs > 0 ? `+${(lyricOffsetMs / 1000).toFixed(1)}s (Delayed)` : `${(lyricOffsetMs / 1000).toFixed(1)}s (Advanced)`}`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      if (currentTrack) {
+                        const next = adjustLyricOffset(currentTrack.id, 500);
+                        setLyricOffsetMs(next);
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-[10px] font-bold text-white transition-colors"
+                    title="Lyrics appear before music? Click +0.5s to delay lyrics"
+                  >
+                    +0.5s Delay
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (currentTrack) {
+                        const next = adjustLyricOffset(currentTrack.id, -500);
+                        setLyricOffsetMs(next);
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-[10px] font-bold text-white transition-colors"
+                    title="Lyrics appear after music? Click -0.5s to advance lyrics"
+                  >
+                    -0.5s Advance
+                  </button>
+                  {lyricOffsetMs !== 0 && (
+                    <button
+                      onClick={() => {
+                        if (currentTrack) {
+                          resetLyricOffset(currentTrack.id);
+                          setLyricOffsetMs(0);
+                        }
+                      }}
+                      className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                      title="Reset sync offset to 0"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div 
               ref={lyricsContainerRef}
               className="flex-1 overflow-y-auto px-4 py-8 space-y-6 text-center scroll-smooth mask-fade"
@@ -369,27 +436,42 @@ export const SimpNowPlayingModal: React.FC<SimpNowPlayingModalProps> = ({
                   <p className="text-sm">Fetching synchronized lyrics...</p>
                 </div>
               ) : lyricsData?.lines && lyricsData.lines.length > 0 ? (
-                lyricsData.lines.map((line, idx) => {
-                  const isActive = idx === activeLyricIndex;
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => onSeek(line.timeMs / 1000)}
-                      className={`cursor-pointer transition-all duration-300 py-1 ${
-                        isActive
-                          ? 'text-2xl sm:text-3xl font-black text-[#FFFF00] scale-105 drop-shadow-md'
-                          : 'text-lg sm:text-xl font-medium text-neutral-400 hover:text-neutral-200'
-                      }`}
-                    >
-                      <p>{line.text}</p>
-                      {aiTranslationEnabled && line.translation && (
-                        <p className="text-sm text-neutral-400 font-normal mt-1">
-                          {line.translation}
-                        </p>
-                      )}
+                <>
+                  {/* Instrumental Lead-In Indicator when song is playing before first vocal line */}
+                  {activeLyricIndex === -1 && lyricsData.lines.length > 0 && effectiveCurrentMs < lyricsData.lines[0].timeMs && (
+                    <div className="py-4 px-2 flex flex-col items-center justify-center gap-1.5 text-neutral-400 animate-pulse">
+                      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-[#8ECAE6]">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8ECAE6] opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-[#8ECAE6]"></span>
+                        </span>
+                        <span>♪ Instrumental Intro • Singing starts soon ♪</span>
+                      </div>
                     </div>
-                  );
-                })
+                  )}
+
+                  {lyricsData.lines.map((line, idx) => {
+                    const isActive = idx === activeLyricIndex;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => onSeek(getSeekTimeForLine(line.timeMs, lyricOffsetMs))}
+                        className={`cursor-pointer transition-all duration-300 py-1 ${
+                          isActive
+                            ? 'text-2xl sm:text-3xl font-black text-[#FFFF00] scale-105 drop-shadow-md'
+                            : 'text-lg sm:text-xl font-medium text-neutral-400 hover:text-neutral-200'
+                        }`}
+                      >
+                        <p>{line.text}</p>
+                        {aiTranslationEnabled && line.translation && (
+                          <p className="text-sm text-neutral-400 font-normal mt-1">
+                            {line.translation}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-neutral-400 gap-2">
                   <Mic2 className="w-10 h-10 mb-1 opacity-30" />

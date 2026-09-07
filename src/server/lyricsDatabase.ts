@@ -259,19 +259,21 @@ But now I've gone and thrown it all away
 Mama, ooh, didn't mean to make you cry
 If I'm not back again this time tomorrow
 Carry on, carry on as if nothing really matters`,
-    syncedLyrics: `[00:00.00]Is this the real life? Is this just fantasy?
-[00:07.50]Caught in a landslide, no escape from reality
-[00:14.80]Open your eyes, look up to the skies and see
-[00:22.00]I'm just a poor boy, I need no sympathy
-[00:28.50]Because I'm easy come, easy go, little high, little low
-[00:36.00]Any way the wind blows doesn't really matter to me, to me
-[00:55.00]Mama, just killed a man
-[01:02.00]Put a gun against his head, pulled my trigger, now he's dead
-[01:10.00]Mama, life had just begun
-[01:16.00]But now I've gone and thrown it all away
-[01:23.00]Mama, ooh, didn't mean to make you cry
-[01:31.00]If I'm not back again this time tomorrow
-[01:36.00]Carry on, carry on as if nothing really matters`,
+    syncedLyrics: `[00:00.00]♪ Intro ♪
+[00:03.40]Is this the real life?
+[00:07.80]Is this just fantasy?
+[00:12.80]Caught in a landslide, no escape from reality
+[00:20.80]Open your eyes, look up to the skies and see
+[00:30.20]I'm just a poor boy, I need no sympathy
+[00:37.20]Because I'm easy come, easy go, little high, little low
+[00:45.00]Any way the wind blows doesn't really matter to me, to me
+[00:58.50]Mama, just killed a man
+[01:05.50]Put a gun against his head, pulled my trigger, now he's dead
+[01:13.50]Mama, life had just begun
+[01:20.20]But now I've gone and thrown it all away
+[01:28.50]Mama, ooh, didn't mean to make you cry
+[01:37.80]If I'm not back again this time tomorrow
+[01:42.80]Carry on, carry on as if nothing really matters`,
     source: 'ESHU Database',
     createdAt: 1700000000000,
     updatedAt: 1700000000000,

@@ -348,35 +348,37 @@ export const TOP_ARTISTS: Artist[] = [
 
 // Fallback high-fidelity Synced Lyrics mapping for instant playback demo
 export const SAMPLE_SYNCED_LYRICS: Record<string, string> = {
-  'fJ9rUzIMcZQ': `[00:00.50]Is this the real life?
-[00:04.20]Is this just fantasy?
-[00:08.50]Caught in a landslide, no escape from reality
-[00:16.80]Open your eyes, look up to the skies and see
-[00:26.50]I'm just a poor boy, I need no sympathy
-[00:33.20]Because I'm easy come, easy go, little high, little low
-[00:41.50]Any way the wind blows doesn't really matter to me, to me
-[00:55.20]Mama, just killed a man
-[01:02.10]Put a gun against his head, pulled my trigger, now he's dead
-[01:10.50]Mama, life had just begun
-[01:16.80]But now I've gone and thrown it all away
-[01:25.00]Mama, ooh, didn't mean to make you cry
-[01:34.20]If I'm not back again this time tomorrow
-[01:38.90]Carry on, carry on as if nothing really matters`,
+  'fJ9rUzIMcZQ': `[00:00.00]♪ Intro ♪
+[00:03.40]Is this the real life?
+[00:07.80]Is this just fantasy?
+[00:12.80]Caught in a landslide, no escape from reality
+[00:20.80]Open your eyes, look up to the skies and see
+[00:30.20]I'm just a poor boy, I need no sympathy
+[00:37.20]Because I'm easy come, easy go, little high, little low
+[00:45.00]Any way the wind blows doesn't really matter to me, to me
+[00:58.50]Mama, just killed a man
+[01:05.50]Put a gun against his head, pulled my trigger, now he's dead
+[01:13.50]Mama, life had just begun
+[01:20.20]But now I've gone and thrown it all away
+[01:28.50]Mama, ooh, didn't mean to make you cry
+[01:37.80]If I'm not back again this time tomorrow
+[01:42.80]Carry on, carry on as if nothing really matters`,
 
-  '4NRXx6U8ABQ': `[00:00.00]Yeah
-[00:15.50]I've been tryna call
-[00:19.20]I've been on my own for long enough
-[00:23.00]Maybe you can show me how to love, maybe
-[00:30.80]I'm going through withdrawals
-[00:34.50]You don't even have to do too much
-[00:38.50]You can turn me on with just a touch, baby
-[00:46.50]I look around and Sin City's cold and empty
-[00:52.20]No one's around to judge me
-[00:56.00]I can't see clearly when you're gone
-[01:02.00]I said, ooh, I'm blinded by the lights
-[01:09.50]No, I can't sleep until I feel your touch
-[01:17.50]I said, ooh, I'm drowning in the night
-[01:25.00]Oh, when I'm like this, you're the one I trust`,
+  '4NRXx6U8ABQ': `[00:00.00]♪ Synth Intro ♪
+[00:18.50]Yeah
+[00:22.50]I've been tryna call
+[00:26.20]I've been on my own for long enough
+[00:30.00]Maybe you can show me how to love, maybe
+[00:37.80]I'm going through withdrawals
+[00:41.50]You don't even have to do too much
+[00:45.50]You can turn me on with just a touch, baby
+[00:53.50]I look around and Sin City's cold and empty
+[00:59.20]No one's around to judge me
+[01:03.00]I can't see clearly when you're gone
+[01:09.00]I said, ooh, I'm blinded by the lights
+[01:16.50]No, I can't sleep until I feel your touch
+[01:24.50]I said, ooh, I'm drowning in the night
+[01:32.00]Oh, when I'm like this, you're the one I trust`,
 
   'XXYlFuWEuKI': `[00:00.00]♪ Intro ♪
 [00:09.20]I saw you dancing in a crowded room

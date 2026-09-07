@@ -4,7 +4,7 @@ import { SAMPLE_SYNCED_LYRICS } from '../data/simpMusicData';
 
 // Multi-tier client cache
 const MEMORY_CACHE = new Map<string, LyricsData>();
-const LOCAL_STORAGE_KEY = 'eshu_lyrics_cache_v3';
+const LOCAL_STORAGE_KEY = 'eshu_lyrics_cache_v5';
 
 function getStorageCache(): Record<string, LyricsData> {
   try {

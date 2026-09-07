@@ -6,7 +6,7 @@ const STORAGE_KEY_VIEW_MODE = 'eshu_player_view_mode';
 const STORAGE_KEY_LAST_TRACK_ID = 'eshu_player_last_track_id';
 const STORAGE_KEY_LAST_SESSION = 'eshu_last_player_session';
 
-const VALID_MODES: PlayerViewMode[] = ['artwork', 'canvas', 'visualizer', 'vinyl', 'lyrics'];
+const VALID_MODES: PlayerViewMode[] = ['artwork', 'visualizer', 'vinyl', 'lyrics'];
 
 /**
  * Validates whether a value is a supported PlayerViewMode

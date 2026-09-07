@@ -17,7 +17,8 @@ import {
   ExternalLink,
   Check,
   AlertCircle,
-  FolderPlus
+  FolderPlus,
+  Shuffle
 } from 'lucide-react';
 import { Track, Playlist, Artist } from '../../types';
 import { ECHO_QUICK_PICKS, ECHO_TOP_ARTISTS, COUNTRY_CHARTS } from '../../data/echoMusicData';
@@ -206,6 +207,45 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   // Active track list to show
   const displayedTracks = hasSearched ? liveResults : uniqueStaticTracks.slice(0, 15);
 
+  /**
+   * Generates a randomized queue from search results.
+   * Keeps the selected track first so it starts immediately,
+   * while shuffling all remaining search results so playback advances randomly.
+   */
+  const createRandomQueueFromSearch = (selectedTrack: Track, allTracks: Track[]): Track[] => {
+    if (!allTracks || allTracks.length <= 1) {
+      return [selectedTrack];
+    }
+    const pool = allTracks.filter((t) => t.id !== selectedTrack.id);
+    // Robust Fisher-Yates shuffle
+    const shuffled = [...pool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return [selectedTrack, ...shuffled];
+  };
+
+  const handlePlayTrackFromSearch = (track: Track) => {
+    const randomQueue = createRandomQueueFromSearch(track, displayedTracks);
+    onPlayTrack(track, randomQueue);
+  };
+
+  const handlePlayRandomAll = () => {
+    if (displayedTracks.length === 0) return;
+    const randomIndex = Math.floor(Math.random() * displayedTracks.length);
+    const randomFirstTrack = displayedTracks[randomIndex];
+    const randomQueue = createRandomQueueFromSearch(randomFirstTrack, displayedTracks);
+    onPlayTrack(randomFirstTrack, randomQueue);
+  };
+
+  const handlePlayAllStandard = () => {
+    if (displayedTracks.length === 0) return;
+    const firstTrack = displayedTracks[0];
+    const randomQueue = createRandomQueueFromSearch(firstTrack, displayedTracks);
+    onPlayTrack(firstTrack, randomQueue);
+  };
+
   return (
     <div className="space-y-8 pb-32 animate-fadeIn max-w-5xl mx-auto">
       {/* Search Input Bar */}
@@ -314,7 +354,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             </button>
 
             <button
-              onClick={() => onPlayTrack(directLinkTrack, [directLinkTrack])}
+              onClick={() => handlePlayTrackFromSearch(directLinkTrack)}
               className="flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-extrabold text-black transition-all shadow-lg hover:scale-105"
               style={{ backgroundColor: seedColor }}
             >
@@ -409,19 +449,38 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       {/* Track Results */}
       {(activeFilter === 'all' || activeFilter === 'songs') && (
         <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-2">
-              <Youtube className="w-3.5 h-3.5 text-neutral-400" />
-              <span>{hasSearched ? `Search Results (${displayedTracks.length})` : 'Popular Tracks & Quick Picks'}</span>
-            </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-2">
+                <Youtube className="w-3.5 h-3.5 text-neutral-400" />
+                <span>{hasSearched ? `Search Results (${displayedTracks.length})` : 'Popular Tracks & Quick Picks'}</span>
+              </h3>
+              {hasSearched && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Shuffle className="w-2.5 h-2.5" />
+                  Random Queue
+                </span>
+              )}
+            </div>
             {displayedTracks.length > 0 && (
-              <button
-                onClick={() => onPlayTrack(displayedTracks[0], displayedTracks)}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors"
-              >
-                <Play className="w-3 h-3 fill-white" />
-                <span>Play All</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePlayRandomAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors"
+                  title="Randomize search results and play a random track"
+                >
+                  <Shuffle className="w-3.5 h-3.5" style={{ color: seedColor }} />
+                  <span>Random Queue</span>
+                </button>
+                <button
+                  onClick={handlePlayAllStandard}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors"
+                  title="Play top track with randomized upcoming queue"
+                >
+                  <Play className="w-3 h-3 fill-white" />
+                  <span>Play All</span>
+                </button>
+              </div>
             )}
           </div>
 
@@ -451,7 +510,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                 return (
                   <div
                     key={`${track.id}-${idx}`}
-                    onClick={() => onPlayTrack(track, displayedTracks)}
+                    onClick={() => handlePlayTrackFromSearch(track)}
                     className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer group ${
                       isCurrent
                         ? 'bg-neutral-900 border-white/30 ring-1 ring-[#FF5252]'
