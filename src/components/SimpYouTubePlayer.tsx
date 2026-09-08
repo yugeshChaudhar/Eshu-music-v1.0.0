@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Track, SponsorSegment } from '../types';
+import { apiUrl } from '../services/apiConfig';
 
 declare global {
   interface Window {
@@ -63,10 +64,23 @@ export const SimpYouTubePlayer: React.FC<SimpYouTubePlayerProps> = ({
     }
     const fetchSponsorSegments = async () => {
       try {
-        const res = await fetch(`/api/sponsorblock?videoId=${encodeURIComponent(currentTrack.id)}`);
+        const res = await fetch(apiUrl(`/api/sponsorblock?videoId=${encodeURIComponent(currentTrack.id)}`));
         if (res.ok) {
           const data = await res.json();
           sponsorSegmentsRef.current = data.segments || [];
+          return;
+        }
+      } catch {
+        // Fallback to direct client SponsorBlock API if backend is unavailable (e.g. native mobile)
+      }
+      try {
+        const directUrl = `https://sponsor.ajay.app/api/skipSegments?videoID=${encodeURIComponent(currentTrack.id)}&categories=["sponsor","intro","outro","music_offtopic"]`;
+        const directRes = await fetch(directUrl);
+        if (directRes.ok) {
+          const segments = await directRes.json();
+          sponsorSegmentsRef.current = segments || [];
+        } else {
+          sponsorSegmentsRef.current = [];
         }
       } catch {
         sponsorSegmentsRef.current = [];

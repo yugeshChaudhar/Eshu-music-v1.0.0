@@ -4,6 +4,8 @@
  * to prevent the container / server from idling or sleeping.
  */
 
+import { apiUrl } from './apiConfig';
+
 const PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface HealthStatus {
@@ -53,7 +55,7 @@ class HealthCheckService {
 
   public async ping(): Promise<HealthStatus> {
     try {
-      const response = await fetch('/api/health', {
+      const response = await fetch(apiUrl('/api/health'), {
         method: 'GET',
         headers: {
           'Cache-Control': 'no-cache',

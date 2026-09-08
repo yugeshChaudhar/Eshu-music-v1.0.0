@@ -81,6 +81,7 @@ import { SettingsScreen } from './components/screens/SettingsScreen';
 import { MoodDetailScreen } from './components/screens/MoodDetailScreen';
 import { PlaylistScreen } from './components/screens/PlaylistScreen';
 import { preloadAllMoods } from './services/moodDiscoveryService';
+import { apiUrl } from './services/apiConfig';
 import { 
   Plus, 
   X, 
@@ -820,7 +821,7 @@ export function App() {
 
   const handleDirectImportPlaylist = async (urlOrId: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/youtube/playlist?url=${encodeURIComponent(urlOrId)}`);
+      const res = await fetch(apiUrl(`/api/youtube/playlist?url=${encodeURIComponent(urlOrId)}`));
       if (!res.ok) return false;
       const data = await res.json();
       if (!data.tracks || data.tracks.length === 0) return false;

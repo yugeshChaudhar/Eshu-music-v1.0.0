@@ -46,9 +46,12 @@ function extractYouTubeInfo(input: string): { videoId?: string; playlistId?: str
 }
 
 async function fetchOEmbedMetadata(videoId: string): Promise<SearchTrackResult | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-    const res = await fetch(oembedUrl);
+    const res = await fetch(oembedUrl, { signal: controller.signal });
+    clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
       let cleanTitle = data.title || 'YouTube Track';
@@ -71,33 +74,48 @@ async function fetchOEmbedMetadata(videoId: string): Promise<SearchTrackResult |
       };
     }
   } catch (err) {
-    console.warn('OEmbed fetch error:', err);
+    clearTimeout(timer);
+    // Ignore OEmbed fetch error
   }
   return null;
 }
 
-async function scrapeYouTubeSearch(query: string): Promise<SearchTrackResult[]> {
+const YOUTUBE_CLIENT_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cookie': 'CONSENT=YES+cb.20210328-17-p0.en+FX+999; SOCS=CAESEwgDEgk2MTQ1NzU1NDQaAmVuIAEaBgiA_LyaBg;',
+};
+
+async function searchViaInnertube(query: string): Promise<SearchTrackResult[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6500);
   try {
-    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en`;
-    const response = await fetch(searchUrl, {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/search', {
+      method: 'POST',
+      signal: controller.signal,
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Content-Type': 'application/json',
+        ...YOUTUBE_CLIENT_HEADERS,
       },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20240313.01.00',
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        query,
+      }),
     });
+    clearTimeout(timer);
+    if (!res.ok) return [];
 
-    if (!response.ok) return [];
-
-    const html = await response.text();
-    const dataMatch = html.match(/var ytInitialData = ({.*?});<\/script>/s) ||
-                      html.match(/window\["ytInitialData"\] = ({.*?});<\/script>/s);
-
-    if (!dataMatch || !dataMatch[1]) return [];
-
-    const parsed = JSON.parse(dataMatch[1]);
+    const data = await res.json();
     const sections =
-      parsed?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+      data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
 
     const results: SearchTrackResult[] = [];
 
@@ -145,22 +163,118 @@ async function scrapeYouTubeSearch(query: string): Promise<SearchTrackResult[]> 
     }
 
     return results;
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
+async function searchViaHtmlScrape(query: string): Promise<SearchTrackResult[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en`;
+    const response = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: YOUTUBE_CLIENT_HEADERS,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) return [];
+
+    const html = await response.text();
+    const dataMatch =
+      html.match(/var ytInitialData = ({.*?});<\/script>/s) ||
+      html.match(/window\["ytInitialData"\] = ({.*?});<\/script>/s);
+
+    if (!dataMatch || !dataMatch[1]) return [];
+
+    const parsed = JSON.parse(dataMatch[1]);
+    const sections =
+      parsed?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+
+    const results: SearchTrackResult[] = [];
+
+    for (const section of sections) {
+      const items = section?.itemSectionRenderer?.contents || [];
+      for (const item of items) {
+        if (item.videoRenderer) {
+          const v = item.videoRenderer;
+          const videoId = v.videoId;
+          if (!videoId) continue;
+
+          let title =
+            v.title?.runs?.[0]?.text ||
+            v.title?.simpleText ||
+            'Unknown Track';
+          let artist =
+            v.ownerText?.runs?.[0]?.text ||
+            v.shortBylineText?.runs?.[0]?.text ||
+            'YouTube Music';
+          const durationStr = v.lengthText?.simpleText || v.lengthText?.runs?.[0]?.text;
+          const duration = parseDuration(durationStr);
+          const views = v.viewCountText?.simpleText || v.shortViewCountText?.simpleText || '';
+
+          if (title.includes(' - ') && artist.toLowerCase().includes('topic')) {
+            const split = title.split(' - ');
+            artist = split[0].trim();
+            title = split.slice(1).join(' - ').trim();
+          }
+
+          results.push({
+            id: videoId,
+            title,
+            artist,
+            duration,
+            thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            views,
+            videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          });
+
+          if (results.length >= 25) break;
+        }
+      }
+      if (results.length >= 25) break;
+    }
+
+    return results;
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
+async function scrapeYouTubeSearch(query: string): Promise<SearchTrackResult[]> {
+  try {
+    // 1. Primary: YouTube Innertube API (Pure JSON, no redirects, fast & reliable)
+    const innertubeResults = await searchViaInnertube(query);
+    if (innertubeResults.length > 0) {
+      return innertubeResults;
+    }
+
+    // 2. Secondary: Direct HTML Scrape with Consent Cookie bypass
+    const htmlResults = await searchViaHtmlScrape(query);
+    if (htmlResults.length > 0) {
+      return htmlResults;
+    }
+
+    return [];
   } catch (err) {
-    console.warn('YouTube search scraping error:', err);
+    // Silently fall back
     return [];
   }
 }
 
 async function scrapeYouTubePlaylist(playlistId: string): Promise<{ title: string; author: string; thumbnail: string; tracks: SearchTrackResult[] }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const playlistUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}&hl=en`;
     const response = await fetch(playlistUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
+      signal: controller.signal,
+      headers: YOUTUBE_CLIENT_HEADERS,
     });
+    clearTimeout(timer);
 
     if (!response.ok) return { title: 'YouTube Playlist', author: 'YouTube', thumbnail: '', tracks: [] };
 
@@ -178,34 +292,71 @@ async function scrapeYouTubePlaylist(playlistId: string): Promise<{ title: strin
       `https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800`;
 
     const tabs = parsed?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
-    const contents = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.playlistVideoListRenderer?.contents || [];
+    const secList = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+    const contents = secList[0]?.itemSectionRenderer?.contents?.[0]?.playlistVideoListRenderer?.contents || 
+                     secList[0]?.itemSectionRenderer?.contents || [];
 
     const tracks: SearchTrackResult[] = [];
     for (const item of contents) {
+      // Check playlistVideoRenderer (classic)
       const v = item.playlistVideoRenderer;
-      if (!v || !v.videoId) continue;
+      if (v && v.videoId) {
+        let songTitle = v.title?.runs?.[0]?.text || v.title?.simpleText || 'Track';
+        let artistName = v.shortBylineText?.runs?.[0]?.text || author;
 
-      let songTitle = v.title?.runs?.[0]?.text || v.title?.simpleText || 'Track';
-      let artistName = v.shortBylineText?.runs?.[0]?.text || author;
+        if (songTitle.includes(' - ') && !artistName.includes(' - ')) {
+          const parts = songTitle.split(' - ');
+          artistName = parts[0].trim();
+          songTitle = parts.slice(1).join(' - ').trim();
+        }
 
-      if (songTitle.includes(' - ') && !artistName.includes(' - ')) {
-        const parts = songTitle.split(' - ');
-        artistName = parts[0].trim();
-        songTitle = parts.slice(1).join(' - ').trim();
+        const duration = parseInt(v.lengthSeconds || '210', 10);
+        const thumb = v.thumbnail?.thumbnails?.slice(-1)?.[0]?.url || `https://img.youtube.com/vi/${v.videoId}/hqdefault.jpg`;
+
+        tracks.push({
+          id: v.videoId,
+          title: songTitle,
+          artist: artistName.replace(/\s*-\s*Topic$/i, '').trim(),
+          album: title,
+          duration: isNaN(duration) ? 210 : duration,
+          thumbnail: thumb,
+          videoUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
+        });
+        continue;
       }
 
-      const duration = parseInt(v.lengthSeconds || '210', 10);
-      const thumb = v.thumbnail?.thumbnails?.slice(-1)?.[0]?.url || `https://img.youtube.com/vi/${v.videoId}/hqdefault.jpg`;
+      // Check lockupViewModel (modern)
+      const l = item.lockupViewModel;
+      if (l && l.contentId) {
+        const videoId = l.contentId;
+        const metaLockup = l.metadata?.lockupMetadataViewModel;
+        const label = l.rendererContext?.accessibilityContext?.label || '';
+        let songTitle = metaLockup?.title?.content || '';
+        const metadataRows = metaLockup?.metadata?.contentMetadataViewModel?.metadataRows || [];
+        let artistName = metadataRows[0]?.metadataParts?.[0]?.text?.content || author;
 
-      tracks.push({
-        id: v.videoId,
-        title: songTitle,
-        artist: artistName.replace(/\s*-\s*Topic$/i, '').trim(),
-        album: title,
-        duration: isNaN(duration) ? 210 : duration,
-        thumbnail: thumb,
-        videoUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
-      });
+        if (!songTitle && label) {
+          // e.g. "Shakira, Burna Boy - Dai Dai (Official Video) 4 minutes, 1 second"
+          const cleanLabel = label.replace(/\s*\d+\s*(?:minutes?|seconds?|hours?)(?:,\s*\d+\s*(?:minutes?|seconds?))?$/i, '').trim();
+          songTitle = cleanLabel || 'Track';
+        }
+
+        if (songTitle.includes(' - ') && (!artistName || artistName === author)) {
+          const parts = songTitle.split(' - ');
+          artistName = parts[0].trim();
+          songTitle = parts.slice(1).join(' - ').trim();
+        }
+
+        tracks.push({
+          id: videoId,
+          title: songTitle || 'Track',
+          artist: artistName.replace(/\s*-\s*Topic$/i, '').trim() || 'YouTube Artist',
+          album: title,
+          duration: 210,
+          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        });
+      }
     }
 
     return {
@@ -214,8 +365,8 @@ async function scrapeYouTubePlaylist(playlistId: string): Promise<{ title: strin
       thumbnail: tracks[0]?.thumbnail || thumbnail,
       tracks,
     };
-  } catch (err) {
-    console.warn('Scrape playlist error:', err);
+  } catch {
+    clearTimeout(timer);
     return { title: 'YouTube Playlist', author: 'YouTube', thumbnail: '', tracks: [] };
   }
 }

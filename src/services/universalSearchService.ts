@@ -1,5 +1,6 @@
 import { Track } from '../types';
 import { ECHO_QUICK_PICKS, COUNTRY_CHARTS, ECHO_TOP_ARTISTS } from '../data/echoMusicData';
+import { apiUrl } from './apiConfig';
 
 export interface SearchResponse {
   results: Track[];
@@ -218,7 +219,7 @@ export async function universalSearch(query: string): Promise<SearchResponse> {
 
   // 2. Try Node/Vercel /api/search endpoint first
   try {
-    const apiRes = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
+    const apiRes = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(trimmed)}`));
     const contentType = apiRes.headers.get('content-type') || '';
     if (apiRes.ok && contentType.includes('application/json')) {
       const data = await apiRes.json();
@@ -323,7 +324,7 @@ export async function fetchLiveSearchSuggestions(query: string): Promise<string[
 
   // Try local /api/search/suggestions
   try {
-    const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(trimmed)}`);
+    const res = await fetch(apiUrl(`/api/search/suggestions?q=${encodeURIComponent(trimmed)}`));
     const ct = res.headers.get('content-type') || '';
     if (res.ok && ct.includes('application/json')) {
       const data = await res.json();

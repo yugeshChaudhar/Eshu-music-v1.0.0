@@ -1,6 +1,7 @@
 import { LyricsData, LyricsRecord } from '../types';
 import { parseLrcString, createDistributedSyncedLines } from './lrcParser';
 import { SAMPLE_SYNCED_LYRICS } from '../data/simpMusicData';
+import { apiUrl } from './apiConfig';
 
 // Multi-tier client cache
 const MEMORY_CACHE = new Map<string, LyricsData>();
@@ -143,7 +144,7 @@ export async function fetchLyricsForTrack(
       params.append('duration', Math.round(durationSeconds).toString());
     }
 
-    const res = await fetch(`/api/lyrics?${params.toString()}`, { signal });
+    const res = await fetch(apiUrl(`/api/lyrics?${params.toString()}`), { signal });
     if (res.ok) {
       const data = await res.json();
 
@@ -225,7 +226,7 @@ export async function fetchLyricsForTrack(
 
 export async function fetchAllDatabaseLyrics(query?: string): Promise<LyricsRecord[]> {
   try {
-    const url = query ? `/api/lyrics/db?q=${encodeURIComponent(query)}` : '/api/lyrics/db';
+    const url = query ? apiUrl(`/api/lyrics/db?q=${encodeURIComponent(query)}`) : apiUrl('/api/lyrics/db');
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch lyrics list');
     const data = await res.json();
@@ -238,7 +239,7 @@ export async function fetchAllDatabaseLyrics(query?: string): Promise<LyricsReco
 
 export async function fetchLyricsRecordById(id: string): Promise<LyricsRecord | null> {
   try {
-    const res = await fetch(`/api/lyrics/db/${encodeURIComponent(id)}`);
+    const res = await fetch(apiUrl(`/api/lyrics/db/${encodeURIComponent(id)}`));
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -257,7 +258,7 @@ export async function saveLyricsToDatabase(record: {
   songId?: string;
   source?: string;
 }): Promise<LyricsRecord> {
-  const res = await fetch('/api/lyrics/db', {
+  const res = await fetch(apiUrl('/api/lyrics/db'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(record),
@@ -286,7 +287,7 @@ export async function updateLyricsInDatabase(
     source?: string;
   }>
 ): Promise<LyricsRecord> {
-  const res = await fetch(`/api/lyrics/db/${encodeURIComponent(id)}`, {
+  const res = await fetch(apiUrl(`/api/lyrics/db/${encodeURIComponent(id)}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(record),
@@ -305,7 +306,7 @@ export async function updateLyricsInDatabase(
 }
 
 export async function deleteLyricsFromDatabase(id: string, title?: string, artist?: string, songId?: string): Promise<boolean> {
-  const res = await fetch(`/api/lyrics/db/${encodeURIComponent(id)}`, {
+  const res = await fetch(apiUrl(`/api/lyrics/db/${encodeURIComponent(id)}`), {
     method: 'DELETE',
   });
 
