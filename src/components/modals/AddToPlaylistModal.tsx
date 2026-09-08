@@ -6,7 +6,8 @@ import {
   FolderPlus, 
   ListMusic, 
   Sparkles,
-  Music2
+  Music2,
+  Trash2
 } from 'lucide-react';
 import { Track, Playlist } from '../../types';
 
@@ -16,6 +17,7 @@ interface AddToPlaylistModalProps {
   track: Track | null;
   playlists: Playlist[];
   onAddToPlaylist: (playlistId: string, track: Track) => boolean;
+  onRemoveFromPlaylist?: (playlistId: string, trackId: string) => void;
   onCreatePlaylistWithTrack: (name: string, track: Track) => void;
   seedColor?: string;
 }
@@ -26,6 +28,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   track,
   playlists,
   onAddToPlaylist,
+  onRemoveFromPlaylist,
   onCreatePlaylistWithTrack,
   seedColor = '#FF5252',
 }) => {
@@ -38,8 +41,19 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
 
   const handleToggleAdd = (pl: Playlist) => {
     const plTracks = pl.tracks || [];
-    const isAlreadyIn = plTracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id);
-    if (!isAlreadyIn) {
+    const isAlreadyIn = (plTracks.some((t) => t.id === track.id) || addedPlaylistIds.has(pl.id));
+    if (isAlreadyIn) {
+      if (onRemoveFromPlaylist) {
+        onRemoveFromPlaylist(pl.id, track.id);
+        setAddedPlaylistIds((prev) => {
+          const next = new Set(prev);
+          next.delete(pl.id);
+          return next;
+        });
+        setFeedbackMsg(`Removed from "${pl.title}"`);
+        setTimeout(() => setFeedbackMsg(null), 2500);
+      }
+    } else {
       const success = onAddToPlaylist(pl.id, track);
       if (success) {
         setAddedPlaylistIds((prev) => new Set([...prev, pl.id]));
@@ -168,8 +182,12 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
 
                   <div className="flex-shrink-0 pl-2">
                     {isIncluded ? (
-                      <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                        <Check className="w-4 h-4" />
+                      <span 
+                        className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 group-hover:bg-rose-500/20 group-hover:text-rose-400 flex items-center justify-center border border-emerald-500/30 group-hover:border-rose-500/30 transition-colors"
+                        title="Click to remove song from playlist"
+                      >
+                        <Check className="w-4 h-4 group-hover:hidden" />
+                        <Trash2 className="w-3.5 h-3.5 hidden group-hover:inline-block" />
                       </span>
                     ) : (
                       <span className="w-7 h-7 rounded-xl bg-white/10 text-neutral-400 hover:text-white flex items-center justify-center transition-colors">

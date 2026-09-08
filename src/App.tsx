@@ -28,6 +28,7 @@ import {
   saveCustomPlaylist, 
   deleteCustomPlaylist, 
   addTrackToPlaylist,
+  removeTrackFromPlaylist,
   getFollowedArtists, 
   toggleFollowArtist, 
   getSavedSettings, 
@@ -78,6 +79,7 @@ import { EqualizerScreen } from './components/screens/EqualizerScreen';
 import { AnalyticsScreen } from './components/screens/AnalyticsScreen';
 import { SettingsScreen } from './components/screens/SettingsScreen';
 import { MoodDetailScreen } from './components/screens/MoodDetailScreen';
+import { PlaylistScreen } from './components/screens/PlaylistScreen';
 import { preloadAllMoods } from './services/moodDiscoveryService';
 import { 
   Plus, 
@@ -775,7 +777,29 @@ export function App() {
     if (!track || isDomOrEvent(track)) return false;
     const res = addTrackToPlaylist(playlistId, track);
     setCustomPlaylists(res.playlists);
+    if (selectedPlaylistView && selectedPlaylistView.id === playlistId) {
+      const updated = res.playlists.find((p) => p.id === playlistId);
+      if (updated) setSelectedPlaylistView(updated);
+    }
     return res.success;
+  };
+
+  const handleRemoveTrackFromPlaylist = (playlistId: string, trackId: string, trackIndex?: number) => {
+    const res = removeTrackFromPlaylist(playlistId, typeof trackIndex === 'number' ? trackIndex : trackId);
+    if (res.success) {
+      setCustomPlaylists(res.playlists);
+      if (selectedPlaylistView && selectedPlaylistView.id === playlistId) {
+        setSelectedPlaylistView(res.updatedPlaylist);
+      }
+    }
+  };
+
+  const handleDeletePlaylist = (playlistId: string) => {
+    const updated = deleteCustomPlaylist(playlistId);
+    setCustomPlaylists(updated);
+    if (selectedPlaylistView && selectedPlaylistView.id === playlistId) {
+      setSelectedPlaylistView(null);
+    }
   };
 
   const handleCreatePlaylistWithTrack = (title: string, trackInput: Track) => {
@@ -896,74 +920,33 @@ export function App() {
         <main className="flex-1 p-4 sm:p-6 lg:p-8 min-w-0 overflow-y-auto max-h-[calc(100vh-61px)]">
           {/* A. Playlist Detail View */}
           {selectedPlaylistView && (
-            <div className="space-y-6 pb-32 animate-fadeIn max-w-5xl mx-auto">
-              <button
-                onClick={() => setSelectedPlaylistView(null)}
-                className="flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-white transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back</span>
-              </button>
-
-              <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 p-6 rounded-3xl bg-neutral-900/80 border border-white/10">
-                <img 
-                  src={selectedPlaylistView.thumbnail} 
-                  alt={selectedPlaylistView.title}
-                  className="w-44 h-44 rounded-2xl object-cover shadow-2xl" 
-                />
-                <div className="space-y-2 text-center sm:text-left flex-1">
-                  <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">
-                    Playlist
-                  </span>
-                  <h1 className="text-2xl sm:text-4xl font-extrabold text-white">
-                    {selectedPlaylistView.title}
-                  </h1>
-                  <p className="text-xs text-neutral-400">
-                    {selectedPlaylistView.description}
-                  </p>
-                  <p className="text-xs font-semibold text-neutral-300">
-                    {selectedPlaylistView.trackCount} Tracks • Echo Music
-                  </p>
-
-                  <div className="flex items-center gap-3 pt-2 justify-center sm:justify-start">
-                    {selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0 && (
-                      <button
-                        onClick={() => handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks)}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs text-black"
-                        style={{ backgroundColor: settings.seedColor }}
-                      >
-                        <Play className="w-4 h-4 fill-black" />
-                        <span>Play</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Tracks in Playlist */}
-              <div className="space-y-2">
-                {(selectedPlaylistView.tracks || []).map((track, idx) => (
-                  <div
-                    key={track.id}
-                    onClick={() => handlePlayTrack(track, selectedPlaylistView.tracks || [])}
-                    className="p-3 rounded-2xl bg-neutral-900/60 hover:bg-neutral-900 border border-white/10 transition-all flex items-center justify-between gap-3 cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="w-5 text-center text-xs font-bold text-neutral-400">
-                        {idx + 1}
-                      </span>
-                      <img src={track.thumbnail} alt={track.title} className="w-11 h-11 rounded-xl object-cover" />
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-[#FF5252]">
-                          {track.title}
-                        </h4>
-                        <p className="text-[11px] text-neutral-400 truncate">{track.artist}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <PlaylistScreen
+              playlist={selectedPlaylistView}
+              currentPlayingTrackId={currentTrack?.id}
+              seedColor={settings.seedColor}
+              onBack={() => setSelectedPlaylistView(null)}
+              onPlayTrack={(track, fromList) => handlePlayTrack(track, fromList)}
+              onPlayAll={() => {
+                if (selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0) {
+                  handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks);
+                }
+              }}
+              onShuffleAll={() => {
+                if (selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0) {
+                  const shuffled = [...selectedPlaylistView.tracks].sort(() => Math.random() - 0.5);
+                  handlePlayTrack(shuffled[0], shuffled);
+                }
+              }}
+              onRemoveTrackFromPlaylist={(trackId, trackIndex) => {
+                handleRemoveTrackFromPlaylist(selectedPlaylistView.id, trackId, trackIndex);
+              }}
+              onDeletePlaylist={(playlistId) => {
+                handleDeletePlaylist(playlistId);
+              }}
+              onToggleFavorite={handleToggleFavorite}
+              isFavorite={(id) => favorites.some((f) => f.id === id)}
+              onAddToQueue={(track) => setPlayQueue((prev) => [...prev, track])}
+            />
           )}
 
           {/* B. Artist Detail View */}
@@ -1133,10 +1116,7 @@ export function App() {
                   }}
                   onSelectPlaylist={(pl) => setSelectedPlaylistView(pl)}
                   onCreatePlaylist={() => setIsCreatePlaylistOpen(true)}
-                  onDeletePlaylist={(id) => {
-                    const updated = deleteCustomPlaylist(id);
-                    setCustomPlaylists(updated);
-                  }}
+                  onDeletePlaylist={handleDeletePlaylist}
                   onToggleFavorite={handleToggleFavorite}
                   onAddToPlaylist={handleOpenAddToPlaylist}
                   youtubeUser={youtubeUser}
@@ -1340,6 +1320,7 @@ export function App() {
         track={trackForPlaylist}
         playlists={customPlaylists}
         onAddToPlaylist={handleAddToPlaylist}
+        onRemoveFromPlaylist={handleRemoveTrackFromPlaylist}
         onCreatePlaylistWithTrack={handleCreatePlaylistWithTrack}
         seedColor={settings.seedColor}
       />

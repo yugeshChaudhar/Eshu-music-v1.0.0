@@ -1,6 +1,30 @@
 import React, { useEffect, useRef, useState, memo } from 'react';
-import { Sparkles, Waves, BarChart2, Disc, Zap } from 'lucide-react';
+import { 
+  Sparkles, 
+  Waves, 
+  BarChart2, 
+  Disc, 
+  Mic, 
+  MicOff, 
+  Volume2, 
+  Music, 
+  Flame, 
+  Radio 
+} from 'lucide-react';
 import { Track } from '../types';
+import { 
+  isLiveAudioActive, 
+  getLiveAnalyserNode, 
+  toggleLiveAudio, 
+  subscribeLiveAudio,
+  shouldAutoStartLiveAudio 
+} from '../services/realAudioService';
+import { 
+  getTrackProgression, 
+  synthesizeChordBassSpectrum, 
+  ChordInfo, 
+  SongSection 
+} from '../services/chordBassEngine';
 
 export type VisualizerPreset = 'spectrum' | 'wave' | 'orbit' | 'particles';
 
@@ -16,19 +40,6 @@ interface MusicReactiveVisualizerProps {
   analyserNode?: AnalyserNode | null;
 }
 
-// Derive a musically coherent BPM based on track metadata
-function estimateTrackBpm(track: Track): number {
-  const text = `${track.title} ${track.artist} ${track.category || ''}`.toLowerCase();
-  if (text.includes('synth') || text.includes('cyber') || text.includes('dance') || text.includes('electronic') || text.includes('house')) return 126;
-  if (text.includes('hip hop') || text.includes('rap') || text.includes('trap')) return 140;
-  if (text.includes('rock') || text.includes('metal') || text.includes('punk')) return 132;
-  if (text.includes('lofi') || text.includes('chill') || text.includes('study') || text.includes('relax')) return 82;
-  if (text.includes('acoustic') || text.includes('folk') || text.includes('indie')) return 98;
-  if (text.includes('ambient') || text.includes('sleep') || text.includes('meditat') || text.includes('piano')) return 68;
-  if (text.includes('pop') || text.includes('r&b')) return 105;
-  return 116;
-}
-
 export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = memo(({
   currentTrack,
   isPlaying,
@@ -38,21 +49,25 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
   duration = 200,
   seedColor = '#FF5252',
   className = '',
-  analyserNode = null,
+  analyserNode: externalAnalyser = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [preset, setPreset] = useState<VisualizerPreset>('spectrum');
+  const [isLiveMicActive, setIsLiveMicActive] = useState<boolean>(() => isLiveAudioActive());
+  const [bassBoostLevel, setBassBoostLevel] = useState<number>(1.4); // 1.0 = normal, 1.4 = punchy, 2.0 = heavy
+  const [activeChordName, setActiveChordName] = useState<string>('');
+  const [activeSectionName, setActiveSectionName] = useState<string>('Intro');
+  const [activeBassNote, setActiveBassNote] = useState<string>('');
 
-  // References for zero-overhead 60FPS animation loop
+  // Zero-overhead state refs for 60FPS animation loop
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
 
   const isBufferingRef = useRef(isBuffering);
   isBufferingRef.current = isBuffering;
 
-  // Normalized volume (0.0 to 1.0)
   const normalizedVol = volume > 1 ? volume / 100 : volume;
   const volumeRef = useRef(normalizedVol);
   volumeRef.current = normalizedVol;
@@ -60,26 +75,46 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
   const currentTimeRef = useRef(currentTime);
   currentTimeRef.current = currentTime;
 
+  const durationRef = useRef(duration);
+  durationRef.current = duration;
+
   const seedColorRef = useRef(seedColor);
   seedColorRef.current = seedColor;
 
   const presetRef = useRef(preset);
   presetRef.current = preset;
 
-  const currentTrackIdRef = useRef(currentTrack.id);
+  const bassBoostRef = useRef(bassBoostLevel);
+  bassBoostRef.current = bassBoostLevel;
+
+  const externalAnalyserRef = useRef(externalAnalyser);
+  externalAnalyserRef.current = externalAnalyser;
 
   // Shockwave ripples created by clicks/touches
   const shockwavesRef = useRef<Array<{ x: number; y: number; radius: number; maxRadius: number; strength: number; alpha: number }>>([]);
-
-  // Check for reduced motion preference
   const prefersReducedMotionRef = useRef(false);
+
+  // Subscribe to live audio activation changes
   useEffect(() => {
+    const unsubscribe = subscribeLiveAudio((active) => {
+      setIsLiveMicActive(active);
+    });
+
+    if (shouldAutoStartLiveAudio() && !isLiveAudioActive()) {
+      // Auto-reconnect if user had previously enabled live audio
+      toggleLiveAudio().catch(() => {});
+    }
+
     if (typeof window !== 'undefined' && window.matchMedia) {
       prefersReducedMotionRef.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     }
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
-  // Main Canvas & Audio Reactive Loop
+  // Main High-Precision 60FPS Canvas Animation Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -91,24 +126,23 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
     let animationFrameId: number;
     let isRunning = true;
 
-    // Buffer allocations (Fixed allocations, 0 GC per frame)
+    // Buffer allocations (0 GC per frame)
     const numBars = 48;
     const barValues = new Float32Array(numBars);
     const targetBarValues = new Float32Array(numBars);
     const peakValues = new Float32Array(numBars);
     const peakDecay = new Float32Array(numBars);
 
-    // Audio frequency bands
+    // Dynamic audio energy levels
     let bassEnergy = 0;
     let midEnergy = 0;
     let trebleEnergy = 0;
     let overallEnergy = 0;
-
     let bassPulse = 0;
-    let lastBeatTime = 0;
+    let chordGlow = 0;
 
-    // Particle field
-    const numParticles = prefersReducedMotionRef.current ? 16 : 40;
+    // Particles for Starfield
+    const numParticles = prefersReducedMotionRef.current ? 16 : 42;
     const particles: Array<{
       x: number;
       y: number;
@@ -126,28 +160,20 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
         y: Math.random(),
         vx: (Math.random() - 0.5) * 0.002,
         vy: -0.001 - Math.random() * 0.003,
-        baseRadius: 1 + Math.random() * 2.5,
+        baseRadius: 1.2 + Math.random() * 2.2,
         radius: 2,
         alpha: 0.2 + Math.random() * 0.6,
-        hueOffset: (Math.random() - 0.5) * 40,
+        hueOffset: (Math.random() - 0.5) * 35,
       });
     }
 
-    // Web Audio Analyser buffer if available
-    let realFreqData: Uint8Array | null = null;
-    if (analyserNode) {
-      try {
-        realFreqData = new Uint8Array(analyserNode.frequencyBinCount);
-      } catch {}
-    }
+    // Get harmonic musical chord progression for current track
+    const { progression, bpm, genre } = getTrackProgression(currentTrack);
 
-    const trackBpm = estimateTrackBpm(currentTrack);
-    const beatInterval = 60 / trackBpm; // seconds per beat
+    // Live Web Audio frequency data buffer
+    let liveFreqBuffer: Uint8Array | null = null;
 
-    // Track ID tracking to reset on song changes
-    currentTrackIdRef.current = currentTrack.id;
-
-    // Handle high DPI display scaling
+    // High DPI Retina display scaling
     const updateSize = () => {
       if (!canvas || !container) return;
       const rect = container.getBoundingClientRect();
@@ -171,6 +197,7 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
     }
 
     let lastFrameTime = performance.now();
+    let lastHudUpdate = 0;
 
     const render = (now: number) => {
       if (!isRunning) return;
@@ -183,193 +210,217 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
       const width = rect.width || 320;
       const height = rect.height || 260;
 
-      // 1. Audio Analysis & Frequency Synthesis
       const active = isPlayingRef.current && !isBufferingRef.current;
       const currentVol = volumeRef.current;
       const curTime = currentTimeRef.current;
+      const dur = durationRef.current;
+      const boost = bassBoostRef.current;
 
       let rawBass = 0;
       let rawMid = 0;
       let rawTreble = 0;
 
-      if (analyserNode && realFreqData) {
-        try {
-          analyserNode.getByteFrequencyData(realFreqData);
-          const binCount = realFreqData.length;
-          
-          // Split into Low (0 - 15%), Mid (15% - 50%), High (50% - 100%)
-          const bassEnd = Math.floor(binCount * 0.15);
-          const midEnd = Math.floor(binCount * 0.5);
+      // Check for Live Audio AnalyserNode (either from realAudioService mic/speakers or external)
+      const activeAnalyser = externalAnalyserRef.current || getLiveAnalyserNode();
 
-          let bSum = 0;
-          for (let i = 0; i < bassEnd; i++) bSum += realFreqData[i];
-          rawBass = bSum / (bassEnd * 255);
+      if (activeAnalyser && active) {
+        // --- 1. REAL LIVE WEB AUDIO REACTION (100% genuine microphone / speaker loopback FFT) ---
+        const binCount = activeAnalyser.frequencyBinCount;
+        if (!liveFreqBuffer || liveFreqBuffer.length !== binCount) {
+          liveFreqBuffer = new Uint8Array(binCount);
+        }
 
-          let mSum = 0;
-          for (let i = bassEnd; i < midEnd; i++) mSum += realFreqData[i];
-          rawMid = mSum / ((midEnd - bassEnd) * 255);
+        activeAnalyser.getByteFrequencyData(liveFreqBuffer);
 
-          let tSum = 0;
-          for (let i = midEnd; i < binCount; i++) tSum += realFreqData[i];
-          rawTreble = tSum / ((binCount - midEnd) * 255);
+        // Analyze frequency spectrum:
+        // Sub-bass & Bass: bins 0 to 12 (approx 20Hz - 250Hz)
+        // Chords & Vocals: bins 13 to 80 (approx 250Hz - 2000Hz)
+        // Treble & Highs: bins 81 to binCount (approx 2000Hz - 16000Hz)
+        const bassEnd = Math.min(14, Math.floor(binCount * 0.08));
+        const midEnd = Math.min(90, Math.floor(binCount * 0.35));
 
-          // Populate bar targets
-          const step = Math.floor(binCount / numBars);
-          for (let i = 0; i < numBars; i++) {
-            const idx = Math.min(i * step, binCount - 1);
-            targetBarValues[i] = (realFreqData[idx] / 255) * currentVol;
-          }
-        } catch {
-          realFreqData = null;
+        let bSum = 0;
+        for (let i = 0; i < bassEnd; i++) bSum += liveFreqBuffer[i];
+        rawBass = (bSum / (bassEnd * 255)) * boost;
+
+        let mSum = 0;
+        for (let i = bassEnd; i < midEnd; i++) mSum += liveFreqBuffer[i];
+        rawMid = mSum / ((midEnd - bassEnd) * 255);
+
+        let tSum = 0;
+        for (let i = midEnd; i < binCount; i++) tSum += liveFreqBuffer[i];
+        rawTreble = tSum / ((binCount - midEnd) * 255);
+
+        // Map live FFT bins across the 48 visualizer bars with logarithmic distribution
+        for (let i = 0; i < numBars; i++) {
+          const logFraction = Math.pow(i / numBars, 1.6);
+          const binIdx = Math.min(binCount - 1, Math.floor(logFraction * (binCount * 0.75)));
+          const rawBin = liveFreqBuffer[binIdx] / 255;
+
+          // Bass boost for lower bars
+          const isBassBar = i < 12;
+          const barMultiplier = isBassBar ? boost : 1.0;
+          targetBarValues[i] = Math.max(0.04, Math.min(1.0, rawBin * barMultiplier * currentVol));
+        }
+
+        if (rawBass > 0.65) {
+          bassPulse = 1.0;
+        }
+
+        // Periodic HUD update (throttled to 100ms)
+        if (now - lastHudUpdate > 120) {
+          lastHudUpdate = now;
+          setActiveChordName('Live FFT Spectrum');
+          setActiveSectionName('Real-Time Mic / Audio');
+          setActiveBassNote(`${Math.round(rawBass * 100)}% Bass Punch`);
+        }
+      } else if (active) {
+        // --- 2. ACOUSTIC CHORD & BASS HARMONIC SYNTHESIS ENGINE ---
+        // Dynamically calculates real chord progressions, 808 sub-bass, and transients
+        const result = synthesizeChordBassSpectrum(
+          curTime,
+          dur,
+          progression,
+          bpm,
+          currentVol,
+          numBars
+        );
+
+        rawBass = result.bassEnergy * boost;
+        rawMid = result.chordEnergy;
+        rawTreble = result.trebleEnergy;
+
+        for (let i = 0; i < numBars; i++) {
+          const isBassBar = i < 12;
+          const barVal = result.bars[i] * (isBassBar ? boost : 1.0);
+          targetBarValues[i] = Math.max(0.04, Math.min(1.0, barVal));
+        }
+
+        if (result.isBassKick) {
+          bassPulse = 1.0;
+        }
+        if (result.isChordStrum) {
+          chordGlow = 0.8;
+        }
+
+        // Update HUD state with current chord & song structure
+        if (now - lastHudUpdate > 120) {
+          lastHudUpdate = now;
+          setActiveChordName(`${result.currentChord.name} (${result.currentChord.notes.slice(0, 3).join('-')})`);
+          setActiveSectionName(result.section.name);
+          setActiveBassNote(`${result.currentChord.rootNote}1 (${Math.round(result.currentChord.rootFreq)} Hz)`);
+        }
+      } else {
+        // Paused state: smooth decay to peaceful rest
+        rawBass *= 0.86;
+        rawMid *= 0.86;
+        rawTreble *= 0.86;
+        for (let i = 0; i < numBars; i++) {
+          targetBarValues[i] = 0.03;
         }
       }
 
-      // If no direct Web Audio stream, synthesize dynamic audio response using acoustic physics model
-      if (!realFreqData) {
-        if (active) {
-          const t = now * 0.001;
-          const beatPhase = (curTime % beatInterval) / beatInterval; // 0 to 1
-          
-          // Sub-bass kick & 808 transient
-          const kickEnvelope = Math.pow(Math.max(0, 1 - (beatPhase * 3.2)), 3.5);
-          const snarePhase = ((curTime + beatInterval * 0.5) % (beatInterval * 2)) / (beatInterval * 2);
-          const snareEnvelope = Math.pow(Math.max(0, 1 - (snarePhase * 4)), 2.8);
-
-          // Rhythmic harmonic waves
-          const bassMod = Math.sin(t * 3.8) * 0.25 + Math.cos(t * 7.1) * 0.15;
-          const midMod = Math.sin(t * 6.2 + 1.2) * 0.3 + Math.cos(t * 11.4) * 0.2;
-          const trebleMod = Math.sin(t * 14.5) * 0.35 + Math.cos(t * 22.1) * 0.25;
-
-          rawBass = Math.min(1, (kickEnvelope * 0.75 + 0.25 + bassMod) * currentVol);
-          rawMid = Math.min(1, (snareEnvelope * 0.5 + 0.35 + midMod) * currentVol);
-          rawTreble = Math.min(1, (0.3 + trebleMod) * currentVol);
-
-          // Synthesize bar targets with distinct frequency bands
-          for (let i = 0; i < numBars; i++) {
-            const normIdx = i / numBars; // 0 (lows) to 1 (highs)
-            let val = 0;
-
-            if (normIdx < 0.25) {
-              // Bass region
-              const barWeight = 1 - (normIdx / 0.25) * 0.4;
-              val = (rawBass * 0.95 + Math.sin(t * 8 + i * 0.6) * 0.15) * barWeight;
-            } else if (normIdx < 0.65) {
-              // Mid region
-              const midFactor = (normIdx - 0.25) / 0.4;
-              val = rawMid * 0.8 + Math.sin(t * 10 + i * 0.8 + curTime * 4) * 0.2 * (1 - Math.abs(midFactor - 0.5));
-            } else {
-              // Treble region
-              val = rawTreble * 0.7 + Math.cos(t * 16 + i * 1.2) * 0.2;
-            }
-
-            // Add organic flutter
-            val += (Math.sin(now * 0.015 + i * 1.7) * 0.08);
-            targetBarValues[i] = Math.max(0.04, Math.min(1, val * currentVol));
-          }
-
-          // Beat pulse detection
-          if (kickEnvelope > 0.65 && now - lastBeatTime > 220) {
-            bassPulse = 1.0;
-            lastBeatTime = now;
-          }
-        } else {
-          // Smoothly decay to calm rest state when paused
-          rawBass *= 0.88;
-          rawMid *= 0.88;
-          rawTreble *= 0.88;
-          for (let i = 0; i < numBars; i++) {
-            targetBarValues[i] = 0.02;
-          }
-        }
-      }
-
-      // Smooth energy bands with attack/decay filters
-      const attackFactor = 0.45;
-      const decayFactor = 0.12;
+      // Smooth attack and viscous falloff physics
+      const attackFactor = 0.65; // Instantaneous attack on transients
+      const decayFactor = 0.14; // Smooth, elastic decay
 
       bassEnergy += (rawBass - bassEnergy) * (rawBass > bassEnergy ? attackFactor : decayFactor);
       midEnergy += (rawMid - midEnergy) * (rawMid > midEnergy ? attackFactor : decayFactor);
       trebleEnergy += (rawTreble - trebleEnergy) * (rawTreble > trebleEnergy ? attackFactor : decayFactor);
-      overallEnergy = (bassEnergy * 0.5 + midEnergy * 0.3 + trebleEnergy * 0.2);
+      overallEnergy = bassEnergy * 0.5 + midEnergy * 0.35 + trebleEnergy * 0.15;
 
-      // Bass pulse decay
-      bassPulse = Math.max(0, bassPulse - dt * 3.8);
+      bassPulse = Math.max(0, bassPulse - dt * 3.6);
+      chordGlow = Math.max(0, chordGlow - dt * 2.8);
 
-      // Update Bar smoothing and Peak indicators
+      // Smooth bar values with physics-based gravity for floating peak caps
       for (let i = 0; i < numBars; i++) {
         const target = targetBarValues[i];
         if (target > barValues[i]) {
-          barValues[i] += (target - barValues[i]) * 0.5; // Fast attack
+          barValues[i] += (target - barValues[i]) * 0.65;
         } else {
-          barValues[i] += (target - barValues[i]) * 0.15; // Smooth falloff
+          barValues[i] += (target - barValues[i]) * 0.18;
         }
 
-        // Peak tracking
         if (barValues[i] >= peakValues[i]) {
           peakValues[i] = barValues[i];
           peakDecay[i] = 0;
         } else {
-          peakDecay[i] += dt * 1.8;
+          peakDecay[i] += dt * 1.6;
           peakValues[i] = Math.max(barValues[i], peakValues[i] - peakDecay[i] * dt);
         }
       }
 
-      // 2. Clear Canvas & Draw Visualizer
+      // --- RENDER VISUALS ---
       ctx.clearRect(0, 0, width, height);
 
       const color = seedColorRef.current || '#FF5252';
       const currentPreset = presetRef.current;
 
-      // Draw Background Glow
-      const bgGlow = ctx.createRadialGradient(
-        width / 2, height / 2, 10,
-        width / 2, height / 2, Math.max(width, height) * 0.7
-      );
-      const glowAlpha = Math.min(0.28, 0.08 + overallEnergy * 0.24 + bassPulse * 0.1);
+      // Dynamic Radial Bass & Chord Ambient Glow
+      const cx = width / 2;
+      const cy = height / 2;
+      const glowRadius = Math.max(width, height) * (0.55 + bassPulse * 0.25);
+      const bgGlow = ctx.createRadialGradient(cx, cy, 10, cx, cy, glowRadius);
+      const glowAlpha = Math.min(0.35, 0.08 + bassEnergy * 0.22 + chordGlow * 0.15);
+      
       bgGlow.addColorStop(0, `${color}${Math.floor(glowAlpha * 255).toString(16).padStart(2, '0')}`);
+      bgGlow.addColorStop(0.7, `${color}15`);
       bgGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = bgGlow;
       ctx.fillRect(0, 0, width, height);
 
-      // 3. Render Mode Specific Visuals
+      // Render preset mode
       if (currentPreset === 'spectrum') {
-        // --- SPECTRUM MODE: Rounded Frequency Bars + Fluid Wave + Floating Peak Caps ---
+        // --- SPECTRUM MODE: Rounded Frequency Bars + Fluid Harmonic Wave ---
         const barWidth = Math.max(3, (width - (numBars - 1) * 2.5) / numBars);
-        const maxBarHeight = height * 0.75;
-        const baseY = height - 12;
+        const maxBarHeight = height * 0.72;
+        const baseY = height - 14;
 
-        // Draw Fluid Mid/Harmonic Wave Ribbon in the background
+        // Harmonic Mid Wave Ribbon in Background
         ctx.beginPath();
         ctx.moveTo(0, baseY - 20);
-        for (let x = 0; x <= width; x += 15) {
+        for (let x = 0; x <= width; x += 12) {
           const normX = x / width;
           const waveY = (
-            Math.sin(normX * 5 + now * 0.003) * 18 * midEnergy +
-            Math.sin(normX * 12 - now * 0.005) * 10 * trebleEnergy
+            Math.sin(normX * 6 + now * 0.0035) * (20 * midEnergy + 5) +
+            Math.sin(normX * 14 - now * 0.006) * (10 * trebleEnergy)
           );
-          ctx.lineTo(x, baseY - 35 - waveY);
+          ctx.lineTo(x, baseY - 28 - waveY);
         }
         ctx.lineTo(width, baseY);
         ctx.lineTo(0, baseY);
         ctx.closePath();
 
-        const waveGrad = ctx.createLinearGradient(0, baseY - 60, 0, baseY);
-        waveGrad.addColorStop(0, `${color}40`);
+        const waveGrad = ctx.createLinearGradient(0, baseY - 70, 0, baseY);
+        waveGrad.addColorStop(0, `${color}45`);
         waveGrad.addColorStop(1, 'rgba(255, 255, 255, 0.02)');
         ctx.fillStyle = waveGrad;
         ctx.fill();
 
-        // Draw Frequency Bars
+        // Frequency Bars (Sub-bass, Chords, Treble)
         for (let i = 0; i < numBars; i++) {
           const x = i * (barWidth + 2.5) + (width - (numBars * (barWidth + 2.5))) / 2;
           const barHeight = Math.max(4, barValues[i] * maxBarHeight);
           const y = baseY - barHeight;
 
-          // Bar Gradient Fill
+          // Bass bars (0-12) have extra punchy gradient
+          const isBass = i < 12;
+          const isChord = i >= 12 && i < 34;
+
           const barGrad = ctx.createLinearGradient(x, baseY, x, y);
-          barGrad.addColorStop(0, `${color}60`);
-          barGrad.addColorStop(0.7, color);
-          barGrad.addColorStop(1, '#FFFFFF');
+          if (isBass) {
+            barGrad.addColorStop(0, `${color}80`);
+            barGrad.addColorStop(0.6, color);
+            barGrad.addColorStop(1, '#FFFFFF');
+          } else if (isChord) {
+            barGrad.addColorStop(0, `${color}60`);
+            barGrad.addColorStop(0.7, color);
+            barGrad.addColorStop(1, '#FFE082');
+          } else {
+            barGrad.addColorStop(0, `${color}40`);
+            barGrad.addColorStop(0.8, '#80DEEA');
+            barGrad.addColorStop(1, '#FFFFFF');
+          }
 
           ctx.fillStyle = barGrad;
           ctx.beginPath();
@@ -382,25 +433,25 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
 
           // Floating Peak Cap
           const peakY = baseY - Math.max(4, peakValues[i] * maxBarHeight) - 3;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.fillStyle = isBass ? '#FFFFFF' : 'rgba(255, 255, 255, 0.85)';
           ctx.fillRect(x, peakY, barWidth, 2);
         }
       } else if (currentPreset === 'wave') {
-        // --- WAVE MODE: Multi-layered Organic Fluid Curves ---
+        // --- WAVE MODE: Multi-Layered Acoustic Harmonic Curves ---
         const layers = 3;
         for (let l = 0; l < layers; l++) {
           ctx.beginPath();
-          const layerOffset = l * 1.4;
-          const layerSpeed = 0.002 + l * 0.001;
+          const layerOffset = l * 1.5;
+          const layerSpeed = 0.0025 + l * 0.001;
           const layerAlpha = 0.35 + (layers - l) * 0.2;
 
           ctx.moveTo(0, height / 2);
           for (let x = 0; x <= width; x += 8) {
             const normX = x / width;
             const yOffset = (
-              Math.sin(normX * (4 + l) + now * layerSpeed + layerOffset) * (40 * bassEnergy + 10) +
-              Math.cos(normX * 8 - now * 0.003) * (20 * midEnergy) +
-              Math.sin(normX * 16 + now * 0.006) * (12 * trebleEnergy)
+              Math.sin(normX * (3 + l) + now * layerSpeed + layerOffset) * (45 * bassEnergy + 10) +
+              Math.cos(normX * 8 - now * 0.003) * (24 * midEnergy) +
+              Math.sin(normX * 16 + now * 0.007) * (14 * trebleEnergy)
             );
             ctx.lineTo(x, height / 2 + yOffset);
           }
@@ -410,19 +461,17 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
 
           const grad = ctx.createLinearGradient(0, height * 0.2, 0, height);
           grad.addColorStop(0, `${color}${Math.floor(layerAlpha * 255).toString(16).padStart(2, '0')}`);
-          grad.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+          grad.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
           ctx.fillStyle = grad;
           ctx.fill();
         }
       } else if (currentPreset === 'orbit') {
         // --- ORBIT MODE: Radial Circular Spectrum around glowing core ---
-        const cx = width / 2;
-        const cy = height / 2;
-        const baseRadius = Math.min(width, height) * 0.22 + bassPulse * 8;
+        const baseRadius = Math.min(width, height) * 0.22 + bassPulse * 12;
 
-        // Central glowing orb
-        const coreGlow = ctx.createRadialGradient(cx, cy, 5, cx, cy, baseRadius * 1.5);
-        coreGlow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+        // Central glowing core
+        const coreGlow = ctx.createRadialGradient(cx, cy, 4, cx, cy, baseRadius * 1.5);
+        coreGlow.addColorStop(0, '#FFFFFF');
         coreGlow.addColorStop(0.4, color);
         coreGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = coreGlow;
@@ -431,18 +480,18 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
         ctx.fill();
 
         // Radial Bars
-        const radialCount = 42;
+        const radialCount = 44;
         for (let i = 0; i < radialCount; i++) {
           const angle = (i / radialCount) * Math.PI * 2 - Math.PI / 2;
           const barIdx = Math.floor((i / radialCount) * numBars);
-          const barLen = Math.max(4, barValues[barIdx] * (Math.min(width, height) * 0.25));
+          const barLen = Math.max(4, barValues[barIdx] * (Math.min(width, height) * 0.28));
 
           const x1 = cx + Math.cos(angle) * (baseRadius + 4);
           const y1 = cy + Math.sin(angle) * (baseRadius + 4);
           const x2 = cx + Math.cos(angle) * (baseRadius + 4 + barLen);
           const y2 = cy + Math.sin(angle) * (baseRadius + 4 + barLen);
 
-          ctx.strokeStyle = i % 2 === 0 ? color : '#FFFFFF';
+          ctx.strokeStyle = i < 12 ? '#FFFFFF' : color;
           ctx.lineWidth = 3;
           ctx.lineCap = 'round';
           ctx.beginPath();
@@ -451,35 +500,28 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
           ctx.stroke();
         }
       } else if (currentPreset === 'particles') {
-        // --- PARTICLES MODE: Dynamic Stardust reacting to Bass & Treble ---
-        const cx = width / 2;
-        const cy = height / 2;
-
-        // Central pulse ring
-        ctx.strokeStyle = `${color}80`;
-        ctx.lineWidth = 2 + bassEnergy * 4;
+        // --- PARTICLES MODE: Dynamic Stardust reacting to Bass & Chords ---
+        ctx.strokeStyle = `${color}90`;
+        ctx.lineWidth = 2 + bassEnergy * 5;
         ctx.beginPath();
-        ctx.arc(cx, cy, 35 + bassPulse * 30, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 35 + bassPulse * 35, 0, Math.PI * 2);
         ctx.stroke();
       }
 
-      // 4. Update & Render Reactive Stardust Particles across all modes
-      const particleSpeedMult = (active ? (1 + trebleEnergy * 2.5) : 0.4) * (prefersReducedMotionRef.current ? 0.4 : 1);
+      // 4. Update & Render Reactive Stardust Particles across all presets
+      const particleSpeedMult = (active ? (1 + trebleEnergy * 2.8) : 0.4) * (prefersReducedMotionRef.current ? 0.4 : 1);
 
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
-
         p.x += p.vx * particleSpeedMult;
         p.y += p.vy * particleSpeedMult;
 
-        // Wrap around
         if (p.x < 0) p.x = 1;
         if (p.x > 1) p.x = 0;
         if (p.y < 0) p.y = 1;
         if (p.y > 1) p.y = 0;
 
-        // Treble sparkle size modulation
-        p.radius = p.baseRadius * (1 + trebleEnergy * 1.5 + bassPulse * 0.8);
+        p.radius = p.baseRadius * (1 + trebleEnergy * 1.8 + bassPulse * 1.1);
 
         const px = p.x * width;
         const py = p.y * height;
@@ -493,7 +535,7 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
       // 5. Render Touch/Click Shockwave Ripples
       for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
         const sw = shockwavesRef.current[i];
-        sw.radius += dt * 180;
+        sw.radius += dt * 190;
         sw.alpha -= dt * 1.4;
 
         if (sw.alpha <= 0 || sw.radius >= sw.maxRadius) {
@@ -518,9 +560,9 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
       cancelAnimationFrame(animationFrameId);
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [currentTrack.id, analyserNode]);
+  }, [currentTrack.id, externalAnalyser]);
 
-  // Interactive Touch & Click Shockwave
+  // Touch & Click Shockwave
   const handleCanvasInteraction = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -534,11 +576,28 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
     shockwavesRef.current.push({
       x,
       y,
-      radius: 5,
+      radius: 6,
       maxRadius: Math.max(rect.width, rect.height) * 0.6,
       strength: 1,
-      alpha: 0.9,
+      alpha: 0.95,
     });
+  };
+
+  const handleToggleMic = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const active = await toggleLiveAudio();
+      setIsLiveMicActive(active);
+    } catch {
+      setIsLiveMicActive(false);
+    }
+  };
+
+  const cycleBassBoost = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (bassBoostLevel === 1.0) setBassBoostLevel(1.5);
+    else if (bassBoostLevel === 1.5) setBassBoostLevel(2.0);
+    else setBassBoostLevel(1.0);
   };
 
   return (
@@ -554,46 +613,107 @@ export const MusicReactiveVisualizer: React.FC<MusicReactiveVisualizerProps> = m
         className="w-full h-full cursor-pointer active:scale-[0.99] transition-transform duration-150"
       />
 
-      {/* Preset Switcher Pills */}
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 p-1 rounded-2xl bg-neutral-950/70 border border-white/10 backdrop-blur-xl shadow-lg">
-        {[
-          { id: 'spectrum' as VisualizerPreset, label: 'Bars', icon: BarChart2 },
-          { id: 'wave' as VisualizerPreset, label: 'Wave', icon: Waves },
-          { id: 'orbit' as VisualizerPreset, label: 'Orbit', icon: Disc },
-          { id: 'particles' as VisualizerPreset, label: 'Stars', icon: Sparkles },
-        ].map((p) => {
-          const Icon = p.icon;
-          const isSelected = preset === p.id;
-          return (
-            <button
-              key={p.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                setPreset(p.id);
-              }}
-              className={`p-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all ${
-                isSelected
-                  ? 'bg-white/20 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-              title={`${p.label} visualizer`}
-            >
-              <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? seedColor : undefined }} />
-              <span className="hidden sm:inline">{p.label}</span>
-            </button>
-          );
-        })}
+      {/* Top Controls Bar */}
+      <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between gap-2 pointer-events-auto">
+        {/* Audio Mode & Bass Boost Button */}
+        <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-neutral-950/80 border border-white/10 backdrop-blur-xl shadow-lg">
+          <button
+            onClick={handleToggleMic}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              isLiveMicActive
+                ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 shadow-emerald-500/10'
+                : 'text-neutral-300 hover:text-white bg-white/5 hover:bg-white/10'
+            }`}
+            title={isLiveMicActive ? 'Listening to Device Mic/Speakers (100% Real FFT)' : 'Switch to Live Device Audio (Mic/Speakers Capture)'}
+          >
+            {isLiveMicActive ? (
+              <>
+                <Mic className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                <span className="hidden sm:inline">Live Audio Sync</span>
+              </>
+            ) : (
+              <>
+                <Radio className="w-3.5 h-3.5 text-neutral-400" />
+                <span className="hidden sm:inline">Acoustic Engine</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={cycleBassBoost}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+            title="Cycle Sub-Bass Boost (1x, 1.5x, 2x)"
+          >
+            <Flame className={`w-3.5 h-3.5 ${bassBoostLevel > 1.0 ? 'text-amber-400' : 'text-neutral-400'}`} />
+            <span>{bassBoostLevel === 1.0 ? 'Bass 1x' : bassBoostLevel === 1.5 ? 'Bass 1.5x' : 'Bass 2x'}</span>
+          </button>
+        </div>
+
+        {/* Preset Switcher Pills */}
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-950/80 border border-white/10 backdrop-blur-xl shadow-lg">
+          {[
+            { id: 'spectrum' as VisualizerPreset, label: 'Bars', icon: BarChart2 },
+            { id: 'wave' as VisualizerPreset, label: 'Wave', icon: Waves },
+            { id: 'orbit' as VisualizerPreset, label: 'Orbit', icon: Disc },
+            { id: 'particles' as VisualizerPreset, label: 'Stars', icon: Sparkles },
+          ].map((p) => {
+            const Icon = p.icon;
+            const isSelected = preset === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreset(p.id);
+                }}
+                className={`p-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all ${
+                  isSelected
+                    ? 'bg-white/20 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+                title={`${p.label} visualizer`}
+              >
+                <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? seedColor : undefined }} />
+                <span className="hidden sm:inline">{p.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Subtle Bottom Track Meta in Visualizer */}
-      <div className="absolute bottom-3 left-4 z-20 pointer-events-none flex items-center gap-2">
-        <div 
-          className="w-2 h-2 rounded-full animate-ping"
-          style={{ backgroundColor: seedColor }}
-        />
-        <span className="text-[11px] font-bold tracking-wider uppercase text-white/70 backdrop-blur-sm">
-          Reactive Engine {isPlaying ? '• Active' : '• Paused'}
-        </span>
+      {/* Dynamic Active Chord & Bass HUD Bar */}
+      <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between gap-2 pointer-events-none">
+        <div className="flex flex-wrap items-center gap-2 p-1.5 px-3 rounded-2xl bg-neutral-950/85 border border-white/10 backdrop-blur-xl shadow-lg text-[11px] font-medium text-neutral-300">
+          <div className="flex items-center gap-1.5">
+            <div 
+              className="w-2 h-2 rounded-full animate-ping"
+              style={{ backgroundColor: seedColor }}
+            />
+            <span className="font-bold text-white uppercase tracking-wider text-[10px]">
+              {isLiveMicActive ? 'Real FFT' : activeSectionName}
+            </span>
+          </div>
+
+          <span className="text-white/20">•</span>
+
+          <div className="flex items-center gap-1 text-white font-semibold">
+            <Music className="w-3 h-3 text-amber-400" />
+            <span>{activeChordName || 'Acoustic Harmonics'}</span>
+          </div>
+
+          {activeBassNote && (
+            <>
+              <span className="text-white/20 hidden sm:inline">•</span>
+              <span className="text-neutral-400 hidden sm:inline">
+                Bass: <span className="text-neutral-200 font-semibold">{activeBassNote}</span>
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="p-1.5 px-2.5 rounded-2xl bg-neutral-950/85 border border-white/10 backdrop-blur-xl shadow-lg text-[10px] font-bold uppercase tracking-wider text-neutral-400 hidden sm:flex items-center gap-1">
+          <span>{isPlaying ? 'Playing' : 'Paused'}</span>
+        </div>
       </div>
     </div>
   );

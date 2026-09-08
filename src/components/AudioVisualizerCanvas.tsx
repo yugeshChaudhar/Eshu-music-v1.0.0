@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, memo } from 'react';
 import { Sparkles, Disc, Waves, BarChart2, Zap, Activity } from 'lucide-react';
+import { getLiveAnalyserNode } from '../services/realAudioService';
 
 export type VisualizerMode = 'bars' | 'wave' | 'orbit' | 'particles';
 export type BeatIntensity = 'gentle' | 'dynamic' | 'bass_heavy';
@@ -272,33 +273,48 @@ export const AudioVisualizerCanvas: React.FC<AudioVisualizerCanvasProps> = memo(
       }
 
       // Frequency Bin Spectrum computation
+      const liveAnalyser = getLiveAnalyserNode();
+      let liveBuffer: Uint8Array | null = null;
+      if (liveAnalyser && isAudible) {
+        liveBuffer = new Uint8Array(liveAnalyser.frequencyBinCount);
+        liveAnalyser.getByteFrequencyData(liveBuffer);
+      }
+
       for (let i = 0; i < numBars; i++) {
         let energy = 0;
         const freqNorm = i / numBars;
 
         if (isAudible) {
-          let bassBand = 0;
-          if (freqNorm < 0.35) {
-            const bassWeight = 1.0 - (freqNorm / 0.35);
-            bassBand = (kickEnvelope * 0.85 * intensityMultiplier + subBassProgression * 0.4) * bassWeight;
-            bassBand += Math.sin(now * 6.0 + i * 0.5) * 0.15 * bassWeight;
-          }
+          if (liveBuffer) {
+            // Real audio spectrum from live analyser node
+            const binIdx = Math.min(liveBuffer.length - 1, Math.floor(Math.pow(freqNorm, 1.5) * liveBuffer.length * 0.7));
+            const rawVal = liveBuffer[binIdx] / 255;
+            const bassBoost = freqNorm < 0.3 ? intensityMultiplier * 1.3 : 1.0;
+            energy = Math.max(0.06, Math.min(1.0, rawVal * bassBoost * effectiveVolume));
+          } else {
+            let bassBand = 0;
+            if (freqNorm < 0.35) {
+              const bassWeight = 1.0 - (freqNorm / 0.35);
+              bassBand = (kickEnvelope * 0.85 * intensityMultiplier + subBassProgression * 0.4) * bassWeight;
+              bassBand += Math.sin(now * 6.0 + i * 0.5) * 0.15 * bassWeight;
+            }
 
-          let midBand = 0;
-          if (freqNorm >= 0.2 && freqNorm <= 0.75) {
-            const midCenter = 1.0 - Math.abs(freqNorm - 0.45) / 0.3;
-            midBand = (snareEnvelope * 0.75 * intensityMultiplier + Math.sin(now * 4.2 + i * 0.6) * 0.22) * midCenter;
-          }
+            let midBand = 0;
+            if (freqNorm >= 0.2 && freqNorm <= 0.75) {
+              const midCenter = 1.0 - Math.abs(freqNorm - 0.45) / 0.3;
+              midBand = (snareEnvelope * 0.75 * intensityMultiplier + Math.sin(now * 4.2 + i * 0.6) * 0.22) * midCenter;
+            }
 
-          let trebleBand = 0;
-          if (freqNorm > 0.6) {
-            const trebleWeight = (freqNorm - 0.6) / 0.4;
-            trebleBand = (hiHatEnvelope * 0.85 * intensityMultiplier + Math.sin(now * 15.0 + i * 1.5) * 0.2) * trebleWeight;
-          }
+            let trebleBand = 0;
+            if (freqNorm > 0.6) {
+              const trebleWeight = (freqNorm - 0.6) / 0.4;
+              trebleBand = (hiHatEnvelope * 0.85 * intensityMultiplier + Math.sin(now * 15.0 + i * 1.5) * 0.2) * trebleWeight;
+            }
 
-          const ambientFlow = (Math.sin(now * 2.5 + i * 0.35) * 0.12 + 0.18);
-          energy = (bassBand + midBand + trebleBand + ambientFlow) * effectiveVolume;
-          energy = Math.max(0.06, Math.min(1.0, energy));
+            const ambientFlow = (Math.sin(now * 2.5 + i * 0.35) * 0.12 + 0.18);
+            energy = (bassBand + midBand + trebleBand + ambientFlow) * effectiveVolume;
+            energy = Math.max(0.06, Math.min(1.0, energy));
+          }
         } else {
           energy = 0.08 + Math.sin(now * 1.5 + i * 0.4) * 0.035;
         }

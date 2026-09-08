@@ -234,6 +234,44 @@ export function addTrackToPlaylist(playlistId: string, trackInput: Track): { suc
   return { success: true, playlists: updated };
 }
 
+export function removeTrackFromPlaylist(
+  playlistId: string, 
+  trackIdOrIndex: string | number
+): { success: boolean; playlists: Playlist[]; updatedPlaylist: Playlist | null } {
+  const current = getCustomPlaylists();
+  const playlistIndex = current.findIndex((p) => p.id === playlistId);
+  if (playlistIndex === -1) return { success: false, playlists: current, updatedPlaylist: null };
+
+  const playlist = { ...current[playlistIndex] };
+  const currentTracks = playlist.tracks ? [...playlist.tracks] : [];
+
+  let updatedTracks: Track[];
+  if (typeof trackIdOrIndex === 'number') {
+    updatedTracks = currentTracks.filter((_, idx) => idx !== trackIdOrIndex);
+  } else {
+    // If string ID, find matching index and remove only that one occurrence
+    const idxToRemove = currentTracks.findIndex((t) => t.id === trackIdOrIndex);
+    if (idxToRemove !== -1) {
+      updatedTracks = currentTracks.filter((_, idx) => idx !== idxToRemove);
+    } else {
+      updatedTracks = currentTracks.filter((t) => t.id !== trackIdOrIndex);
+    }
+  }
+
+  playlist.tracks = updatedTracks;
+  playlist.trackCount = updatedTracks.length;
+
+  // If thumbnail belonged to removed track, fallback to the next available track or default
+  if (!updatedTracks.length) {
+    playlist.thumbnail = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800';
+  } else if (!playlist.thumbnail || playlist.thumbnail === currentTracks[0]?.thumbnail) {
+    playlist.thumbnail = updatedTracks[0]?.thumbnail;
+  }
+
+  const updatedPlaylists = saveCustomPlaylist(playlist);
+  return { success: true, playlists: updatedPlaylists, updatedPlaylist: playlist };
+}
+
 // 3. User Listening Stats & History
 export function getUserStats(): UserStats {
   try {
