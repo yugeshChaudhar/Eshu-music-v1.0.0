@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Play, 
   Pause, 
@@ -27,7 +27,13 @@ import {
   ECHO_TOP_ARTISTS 
 } from '../../data/echoMusicData';
 import { MOOD_DEFINITIONS, getMoodCategory } from '../../services/moodDiscoveryService';
-import { getDynamicQuickPicks } from '../../services/recommendationService';
+import { 
+  getDynamicQuickPicks, 
+  fetchAdaptiveRecommendations, 
+  DynamicQuickPicksResult,
+  getGenuineThumbnail 
+} from '../../services/recommendationService';
+import { subscribeToTasteProfile, recordRecommendationClick } from '../../services/tasteProfileService';
 import { useScreenSize } from '../../hooks/useScreenSize';
 
 interface HomeScreenProps {
@@ -82,15 +88,78 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return 'Good evening';
   };
 
-  // Compute dynamic Quick Picks based on what user is currently playing, history & favorites
-  const dynamicPicks = useMemo(() => {
-    return getDynamicQuickPicks({
+  // Live Adaptive Recommendations State
+  const [adaptivePicks, setAdaptivePicks] = useState<DynamicQuickPicksResult>(() =>
+    getDynamicQuickPicks({
+      currentTrack,
+      history,
+      favorites: favoriteTracks,
+      customPlaylists,
+    })
+  );
+  const [isRefreshingAdaptive, setIsRefreshingAdaptive] = useState(false);
+  const [tasteVersion, setTasteVersion] = useState(0);
+
+  // Subscribe to live taste profile playback updates
+  useEffect(() => {
+    return subscribeToTasteProfile(() => {
+      setTasteVersion((prev) => prev + 1);
+    });
+  }, []);
+
+  // Live Adaptive pipeline: Synchronously sync initial seed, then asynchronously fetch verified playable audio
+  useEffect(() => {
+    let isMounted = true;
+
+    // Immediate synchronous fallback ensures instantaneous render without layout shift
+    const instant = getDynamicQuickPicks({
       currentTrack,
       history,
       favorites: favoriteTracks,
       customPlaylists,
     });
-  }, [currentTrack?.id, history.length, favoriteTracks.length, customPlaylists.length]);
+    setAdaptivePicks((prev) => {
+      // If previous had matching seed, keep prev tracks to avoid flicker; otherwise update headline/tracks
+      if (prev.seedArtist === instant.seedArtist && prev.tracks.length > 0) {
+        return { ...prev, headline: instant.headline, subheadline: instant.subheadline };
+      }
+      return instant;
+    });
+
+    // Fetch verified live adaptive recommendations
+    setIsRefreshingAdaptive(true);
+    fetchAdaptiveRecommendations({
+      currentTrack,
+      history,
+      favorites: favoriteTracks,
+      customPlaylists,
+    })
+      .then((res) => {
+        if (isMounted && res && res.tracks.length > 0) {
+          setAdaptivePicks(res);
+        }
+      })
+      .catch((err) => {
+        console.warn('[HomeScreen] Adaptive recommendations error:', err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsRefreshingAdaptive(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    currentTrack?.id,
+    currentTrack?.artist,
+    history.length,
+    history[0]?.track?.id,
+    favoriteTracks.length,
+    customPlaylists.length,
+    tasteVersion,
+  ]);
 
   return (
     <div className="space-y-8 sm:space-y-10 pb-36 animate-fadeIn max-w-7xl mx-auto px-1 sm:px-0">
@@ -121,8 +190,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* Action Buttons */}
           <div className="flex items-center gap-3 self-start md:self-auto flex-wrap">
             <button
-              onClick={() => onPlayAll(dynamicPicks.tracks)}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-2xl font-bold text-xs sm:text-sm text-black transition-all active:scale-95 shadow-xl hover:brightness-110"
+              id="hero-play-all-btn"
+              onClick={() => onPlayAll(adaptivePicks.tracks)}
+              className="btn-primary"
               style={{ backgroundColor: seedColor }}
             >
               <Play className="w-4 h-4 fill-black" />
@@ -130,8 +200,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </button>
 
             <button
-              onClick={() => onShuffleAll(dynamicPicks.tracks)}
-              className="flex items-center gap-2 px-4 py-2.5 sm:py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs sm:text-sm font-bold text-white transition-all active:scale-95"
+              id="hero-shuffle-btn"
+              onClick={() => onShuffleAll(adaptivePicks.tracks)}
+              className="btn-secondary"
             >
               <Shuffle className="w-4 h-4 text-neutral-300" />
               <span>Shuffle</span>
@@ -140,44 +211,48 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       </section>
 
-      {/* 2. Dynamic Quick Picks (Changes according to what user is listening to) */}
+      {/* 2. Dynamic Quick Picks (Adaptive Discovery based on user listening habits) */}
       <section className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
               <Flame className="w-5 h-5" style={{ color: seedColor }} />
               <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                <span>{dynamicPicks.headline}</span>
-                {currentTrack && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-neutral-300 font-semibold border border-white/10 hidden sm:inline-block">
-                    Live Adaptive
-                  </span>
-                )}
+                <span>{adaptivePicks.headline}</span>
+                <span className="inline-flex items-center gap-1.5 text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/25">
+                  <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${isRefreshingAdaptive ? 'animate-ping' : 'animate-pulse'}`} />
+                  <span>Live Adaptive</span>
+                </span>
               </h2>
             </div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              {dynamicPicks.subheadline}
+              {adaptivePicks.subheadline}
             </p>
           </div>
 
           <button
-            onClick={() => onPlayAll(dynamicPicks.tracks)}
-            className="text-xs font-bold text-neutral-400 hover:text-white transition-colors flex items-center gap-1 self-start sm:self-auto"
+            id="play-all-quick-picks-btn"
+            onClick={() => onPlayAll(adaptivePicks.tracks)}
+            aria-label="Play all picks"
+            className="btn-secondary self-start sm:self-auto group"
           >
+            <Play className="w-3.5 h-3.5 fill-current text-[#FF5252] group-hover:scale-110 transition-transform" />
             <span>Play all picks</span>
-            <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {dynamicPicks.tracks.map((track) => {
+          {adaptivePicks.tracks.map((track) => {
             const isCurrent = currentTrack?.id === track.id;
             const isFav = favoriteTrackIds.has(track.id);
 
             return (
               <div
                 key={track.id}
-                onClick={() => onPlayTrack(track, dynamicPicks.tracks)}
+                onClick={() => {
+                  recordRecommendationClick(track);
+                  onPlayTrack(track, adaptivePicks.tracks);
+                }}
                 className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer group ${
                   isCurrent 
                     ? 'bg-neutral-900 border-white/30 ring-1 ring-[#FF5252]' 
@@ -187,9 +262,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-neutral-800 flex-shrink-0 shadow-md">
                     <img 
-                      src={track.thumbnail} 
-                      alt={track.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
+                      src={track.thumbnail || getGenuineThumbnail(track.id)} 
+                      alt={`${track.title} by ${track.artist}`}
+                      loading="lazy"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.src.includes('img.youtube.com') && /^[a-zA-Z0-9_-]{11}$/.test(track.id)) {
+                          target.src = `https://img.youtube.com/vi/${track.id}/hqdefault.jpg`;
+                        }
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                     />
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       {isCurrent && isPlaying ? (
@@ -217,7 +299,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         e.stopPropagation();
                         onAddToPlaylist(track);
                       }}
-                      className="p-1.5 rounded-lg text-neutral-400 hover:text-white transition-colors"
+                      className="btn-icon !p-1.5 !rounded-lg"
                       title="Add to Playlist"
                     >
                       <FolderPlus className="w-4 h-4" />
@@ -229,7 +311,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       e.stopPropagation();
                       onToggleFavorite(track);
                     }}
-                    className="p-1.5 rounded-lg text-neutral-400 hover:text-white transition-colors"
+                    className="btn-icon !p-1.5 !rounded-lg"
+                    title={isFav ? "Remove from favorites" : "Add to favorites"}
                   >
                     <Heart 
                       className={`w-4 h-4 transition-transform active:scale-125 ${
@@ -262,7 +345,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onCreatePlaylist}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white transition-all active:scale-95"
+              className="btn-secondary !px-3 !py-1.5 !rounded-xl"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Create</span>
@@ -270,7 +353,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             <button
               onClick={() => onTabChange('library')}
-              className="text-xs font-bold text-neutral-400 hover:text-white transition-colors flex items-center gap-1"
+              className="btn-ghost"
             >
               <span>View all</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -295,7 +378,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
               <button
                 onClick={onCreatePlaylist}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs text-black"
+                className="btn-primary"
                 style={{ backgroundColor: seedColor }}
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -305,7 +388,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               {onOpenYouTubeAuth && (
                 <button
                   onClick={onOpenYouTubeAuth}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs border border-white/10"
+                  className="btn-secondary"
                 >
                   <Youtube className="w-3.5 h-3.5 text-[#FF0000] fill-[#FF0000]" />
                   <span>Import from YouTube</span>
@@ -355,7 +438,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               onPlayTrack(pl.tracks[0], pl.tracks);
                             }
                           }}
-                          className="absolute bottom-2 left-2 w-9 h-9 rounded-xl flex items-center justify-center text-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity active:scale-95"
+                          className="btn-primary absolute bottom-2 left-2 !w-9 !h-9 !p-0 !rounded-xl opacity-0 group-hover:opacity-100"
                           style={{ backgroundColor: seedColor }}
                           title="Play Playlist"
                         >

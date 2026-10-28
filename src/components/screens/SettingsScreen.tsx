@@ -56,13 +56,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 }) => {
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
-  const themeOptions: { id: ThemeMode; label: string; bg: string; border: string }[] = [
+  const themeOptions: { id: ThemeMode; label: string; bg: string; border: string; isLight?: boolean }[] = [
+    { id: 'liquid-glass', label: 'Liquid Glass (iOS 26)', bg: 'bg-gradient-to-br from-indigo-950/90 to-[#080c20] backdrop-blur-xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.35)]', border: 'border-indigo-400' },
     { id: 'echo-coral', label: 'Eshu Coral', bg: 'bg-neutral-950', border: 'border-[#FF5252]' },
     { id: 'amoled-noir', label: 'AMOLED Noir', bg: 'bg-black', border: 'border-white/40' },
     { id: 'material-dynamic', label: 'Material Dynamic', bg: 'bg-[#0f172a]', border: 'border-blue-500' },
-    { id: 'liquid-glass', label: 'Liquid Glass', bg: 'bg-[#030712]', border: 'border-indigo-500' },
     { id: 'solarized', label: 'Solarized Dark', bg: 'bg-[#002b36]', border: 'border-teal-500' },
-    { id: 'clean-light', label: 'Clean Light', bg: 'bg-[#FAFAFA]', border: 'border-neutral-300' },
+    { id: 'clean-light', label: 'Clean Light', bg: 'bg-[#FAFAFA]', border: 'border-neutral-300', isLight: true },
   ];
 
   const seedColors = [
@@ -231,8 +231,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     isSelected ? 'ring-2 ring-white border-transparent' : 'border-white/10 hover:border-white/30'
                   }`}
                 >
-                  <span className="text-xs font-bold text-white">{opt.label}</span>
-                  {isSelected && <Check className="w-4 h-4" style={{ color: seedColor }} />}
+                  <span className={`text-xs font-bold ${opt.isLight ? 'text-neutral-900' : 'text-white'}`}>{opt.label}</span>
+                  {isSelected && <Check className="w-4 h-4" style={{ color: opt.isLight ? '#000000' : seedColor }} />}
                 </button>
               );
             })}
@@ -313,25 +313,81 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </div>
 
         {/* DJ Crossfade Slider */}
-        <div className="p-4 rounded-2xl bg-neutral-950/60 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h4 className="text-xs font-bold text-white">DJ Crossfade Transition (Apple Music style)</h4>
-            <p className="text-[11px] text-neutral-400">Smooth volume blending between consecutive tracks</p>
+        <div className="p-5 rounded-2xl bg-neutral-950/60 border border-white/10 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs sm:text-sm font-bold text-white">DJ Crossfade Transition</h4>
+                <span 
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    settings.crossfadeSeconds > 0 
+                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' 
+                      : 'bg-white/5 text-neutral-400 border-white/10'
+                  }`}
+                >
+                  {settings.crossfadeSeconds > 0 ? `${settings.crossfadeSeconds}s crossfade` : 'Off (Gapless)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-400">
+                Smooth volume blend between consecutive tracks like Apple Music & Spotify
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-mono font-extrabold text-white min-w-[36px] text-right">
+                {settings.crossfadeSeconds}s
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+
+          {/* Slider Bar */}
+          <div className="space-y-2">
             <input
               type="range"
               min="0"
-              max="12"
+              max="16"
               step="1"
               value={settings.crossfadeSeconds || 0}
               onChange={(e) => onUpdateSettings({ ...settings, crossfadeSeconds: parseInt(e.target.value) })}
-              className="w-28 sm:w-36 cursor-pointer"
+              className="w-full cursor-pointer h-2 bg-neutral-800 rounded-lg appearance-none"
               style={{ accentColor: seedColor }}
+              aria-label="Crossfade transition duration in seconds"
             />
-            <span className="text-xs font-mono font-bold text-white w-10 text-right">
-              {settings.crossfadeSeconds}s
-            </span>
+            <div className="flex items-center justify-between text-[10px] text-neutral-400 font-medium">
+              <span>0s (Off)</span>
+              <span>4s</span>
+              <span>8s</span>
+              <span>12s</span>
+              <span>16s (Max)</span>
+            </div>
+          </div>
+
+          {/* Quick preset buttons */}
+          <div className="flex items-center gap-2 pt-1 flex-wrap">
+            <span className="text-[11px] text-neutral-400 mr-1">Presets:</span>
+            {[
+              { label: 'Off', val: 0 },
+              { label: '2s', val: 2 },
+              { label: '4s (Default)', val: 4 },
+              { label: '6s', val: 6 },
+              { label: '10s (Club)', val: 10 },
+            ].map((p) => {
+              const isSelected = settings.crossfadeSeconds === p.val;
+              return (
+                <button
+                  key={p.val}
+                  type="button"
+                  onClick={() => onUpdateSettings({ ...settings, crossfadeSeconds: p.val })}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all ${
+                    isSelected 
+                      ? 'text-white bg-white/20 border border-white/30 shadow-sm' 
+                      : 'text-neutral-400 bg-white/5 border border-white/5 hover:text-white hover:bg-white/10'
+                  }`}
+                  style={isSelected ? { borderColor: seedColor, color: '#fff' } : undefined}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 

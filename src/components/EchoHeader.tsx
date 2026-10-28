@@ -6,7 +6,8 @@ import {
   Sliders, 
   Radio, 
   WifiOff, 
-  Youtube
+  User,
+  Settings
 } from 'lucide-react';
 import { TabType, YouTubeUserProfile } from '../types';
 
@@ -19,6 +20,7 @@ interface EchoHeaderProps {
   isOnline?: boolean;
   unreadNotifications?: number;
   seedColor?: string;
+  theme?: string;
   youtubeUser?: YouTubeUserProfile | null;
   onOpenYouTubeAuth?: () => void;
 }
@@ -32,11 +34,18 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
   isOnline = true,
   unreadNotifications = 1,
   seedColor = '#FF5252',
+  theme = 'liquid-glass',
   youtubeUser = null,
   onOpenYouTubeAuth,
 }) => {
+  const isLiquidGlass = theme === 'liquid-glass';
+
   return (
-    <header className="sticky top-0 z-30 w-full bg-neutral-950/80 backdrop-blur-2xl border-b border-white/10 px-4 sm:px-6 py-3 transition-colors">
+    <header className={`sticky top-0 z-30 w-full px-4 sm:px-6 py-2.5 transition-colors ${
+      isLiquidGlass 
+        ? 'liquid-glass-header' 
+        : 'bg-neutral-950/80 backdrop-blur-2xl border-b border-white/10 shadow-md shadow-black/30'
+    }`}>
       <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
         {/* Left: Brand Identity */}
         <div 
@@ -81,13 +90,19 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
         <div className="flex-1 max-w-md hidden md:block">
           <div
             onClick={onOpenSearchFocus}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 hover:border-white/25 text-neutral-400 hover:text-neutral-200 cursor-pointer shadow-inner transition-all group"
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl cursor-pointer transition-all group ${
+              isLiquidGlass
+                ? 'liquid-glass-search text-neutral-300 hover:text-white'
+                : 'bg-neutral-900/90 border border-white/10 hover:border-white/25 text-neutral-400 hover:text-neutral-200 shadow-inner'
+            }`}
           >
             <Search className="w-4 h-4 text-neutral-400 group-hover:text-white transition-colors" />
             <span className="text-xs sm:text-sm font-medium flex-1 truncate">
               Search songs, artists, albums, podcasts, or paste YouTube link...
             </span>
-            <kbd className="hidden lg:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-semibold text-neutral-400 bg-neutral-800 border border-neutral-700 rounded-md shadow-xs">
+            <kbd className={`hidden lg:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-semibold rounded-md ${
+              isLiquidGlass ? 'bg-white/10 text-neutral-300 border border-white/15' : 'text-neutral-400 bg-neutral-800 border border-neutral-700 shadow-xs'
+            }`}>
               ⌘K
             </kbd>
           </div>
@@ -98,12 +113,13 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
           {/* Equalizer & AutoEq Shortcut */}
           <button
             onClick={onOpenEqualizer}
-            className={`p-2 rounded-xl border transition-all ${
+            className={`btn-icon ${isLiquidGlass ? 'liquid-glass-btn' : ''} ${
               activeTab === 'equalizer'
-                ? 'bg-white/20 text-white border-white/30 shadow-lg'
-                : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/10'
+                ? '!bg-white/20 text-white !border-white/30 shadow-lg'
+                : ''
             }`}
             title="AutoEq & Equalizer"
+            aria-label="AutoEq and Equalizer"
           >
             <Sliders className="w-4 h-4" />
           </button>
@@ -126,13 +142,11 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
           {/* YouTube Account Avatar / Connect Button */}
           {onOpenYouTubeAuth && (
             <button
+              id="header-auth-btn"
               onClick={onOpenYouTubeAuth}
-              className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-all ${
-                youtubeUser
-                  ? 'bg-neutral-900/90 hover:bg-neutral-800 border-white/20 text-white'
-                  : 'bg-[#FF0000]/20 hover:bg-[#FF0000]/30 border-[#FF0000]/40 text-red-200'
-              }`}
-              title={youtubeUser ? `YouTube: ${youtubeUser.name}` : 'Connect YouTube Account'}
+              className="btn-secondary !px-2.5 !py-1.5 !rounded-xl"
+              title={youtubeUser ? `Account: ${youtubeUser.name}` : 'Sign in to YouTube'}
+              aria-label={youtubeUser ? `Account: ${youtubeUser.name}` : 'Sign in to YouTube'}
             >
               {youtubeUser ? (
                 <div className="flex items-center gap-1.5">
@@ -149,8 +163,8 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1">
-                  <Youtube className="w-4 h-4 text-[#FF0000] fill-[#FF0000]" />
+                <div className="flex items-center gap-1.5">
+                  <User className="w-4 h-4 text-neutral-300" />
                   <span className="text-xs font-bold text-neutral-200 hidden sm:inline">
                     Sign in
                   </span>
@@ -162,8 +176,9 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
           {/* Notifications Button */}
           <button
             onClick={onOpenNotifications}
-            className="relative p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-white/10 transition-colors"
+            className={`btn-icon relative ${isLiquidGlass ? 'liquid-glass-btn' : ''}`}
             title="What's New & Updates"
+            aria-label="What's New and Notifications"
           >
             <Bell className="w-4 h-4" />
             {unreadNotifications > 0 && (
@@ -172,6 +187,20 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
                 style={{ backgroundColor: seedColor }}
               />
             )}
+          </button>
+
+          {/* Settings Shortcut Button */}
+          <button
+            onClick={() => onTabChange('settings')}
+            className={`btn-icon ${isLiquidGlass ? 'liquid-glass-btn' : ''} ${
+              activeTab === 'settings'
+                ? '!bg-white/20 text-white !border-white/30 shadow-lg'
+                : ''
+            }`}
+            title="Settings & Preferences"
+            aria-label="Settings and Preferences"
+          >
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>

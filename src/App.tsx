@@ -42,6 +42,19 @@ import {
   getLastPlaybackState,
   DEFAULT_ECHO_SETTINGS 
 } from './services/echoStorage';
+import {
+  recordPlaybackStart,
+  recordPlaybackProgress,
+  recordPlaybackComplete,
+  recordPlaybackSkip,
+  recordPlaybackReplay,
+  recordTasteFavorite,
+  recordMeaningfulListen,
+  isMeaningfulListen,
+  checkAndIncrementMeaningfulListens,
+  triggerAdaptiveRecommendationUpdate,
+} from './services/tasteProfileService';
+import { invalidateRecommendationCache } from './services/recommendationService';
 import { fetchLyricsForTrack } from './services/lyricsService';
 import { getAutoActiveLyricIndex } from './services/lyricSyncService';
 import { resolveRealVideoId } from './services/universalSearchService';
@@ -150,6 +163,21 @@ export function App() {
   const isPlayingRef = useRef<boolean>(isPlaying);
   const currentTrackRef = useRef<Track | null>(currentTrack);
   const currentTimeRef = useRef<number>(currentTime);
+  const durationRef = useRef<number>(duration);
+  const volumeRef = useRef<number>(volume);
+  const settingsRef = useRef<EchoSettings>(settings);
+
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     playQueueRef.current = playQueue;
@@ -403,25 +431,58 @@ export function App() {
       if (ytPlayerRef.current) return;
 
       try {
+        const isLocalOrNative = typeof window !== 'undefined' && (
+          !window.location.origin ||
+          window.location.origin.includes('localhost') ||
+          window.location.origin.startsWith('capacitor:') ||
+          window.location.origin.startsWith('file:')
+        );
+
+        console.log(`[EshuMusic Audio] Initializing YouTube Player engine (native/local: ${isLocalOrNative})`);
+
+        const playerVars: Record<string, any> = {
+          autoplay: 0,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          enablejsapi: 1,
+        };
+
+        // Only pass origin on valid remote web hosts; YouTube iframe rejects localhost or capacitor://
+        if (!isLocalOrNative && window.location.origin.startsWith('http')) {
+          playerVars.origin = window.location.origin;
+        } else {
+          playerVars.widget_referrer = 'https://www.youtube.com';
+        }
+
         ytPlayerRef.current = new (window as any).YT.Player('echo-youtube-engine', {
           height: '180',
           width: '320',
+          host: 'https://www.youtube.com',
           videoId: currentTrack?.id || 'fJ9rUzIMcZQ',
-          playerVars: {
-            autoplay: 0,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            rel: 0,
-            modestbranding: 1,
-            playsinline: 1,
-            origin: window.location.origin,
-          },
+          playerVars,
           events: {
             onReady: (event: any) => {
+              console.log('[EshuMusic Audio] YouTube Player Engine ready');
               event.target.setVolume(volume);
+              if (isPlaying) {
+                event.target.playVideo();
+              }
             },
             onStateChange: (event: any) => {
+              const stateMap: Record<number, string> = {
+                [-1]: 'UNSTARTED',
+                [0]: 'ENDED',
+                [1]: 'PLAYING',
+                [2]: 'PAUSED',
+                [3]: 'BUFFERING',
+                [5]: 'CUED',
+              };
+              console.log(`[EshuMusic Audio] Player state changed: ${stateMap[event.data] || event.data} (${event.data})`);
+
               // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING, 0 = ENDED
               if (event.data === 1) {
                 setIsPlaying(true);
@@ -446,16 +507,19 @@ export function App() {
               }
             },
             onError: (err: any) => {
-              console.warn('YouTube Player Engine Error:', err);
-              // Auto-advance to next queued song on error
+              const errCode = err?.data ?? err;
+              console.warn(`[EshuMusic Audio] YouTube Player Engine Error code: ${errCode} on track: "${currentTrack?.title || ''}" (${currentTrack?.id || ''})`);
+              setIsBuffering(false);
+              // Handle error: codes 101 or 150 mean video embedding is restricted by owner.
+              // Try next track after delay, with error dampening
               setTimeout(() => {
                 handleNextTrackRef.current();
-              }, 1200);
+              }, 2500);
             },
           },
         });
       } catch (e) {
-        console.warn('Error instantiating YT Player:', e);
+        console.warn('[EshuMusic Audio] Error instantiating YT Player:', e);
       }
     };
 
@@ -480,18 +544,22 @@ export function App() {
     };
   }, []);
 
-  // 3. Playback Clock & Progress Tracker (100ms precision for silky-smooth lyric synchronization)
+  // 3. Playback Clock & Progress Tracker (100ms precision for silky-smooth lyric synchronization & DJ crossfade)
+  const isCrossfadingRef = useRef<boolean>(false);
+
   useEffect(() => {
     let timer: any;
     if (isPlaying) {
       updatePlayerActivityTimestamp();
       timer = setInterval(() => {
         updatePlayerActivityTimestamp();
+        let curSec = 0;
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
           const curr = ytPlayerRef.current.getCurrentTime();
           if (typeof curr === 'number' && !isNaN(curr) && curr >= 0) {
             setCurrentTime(curr);
             currentTimeRef.current = curr;
+            curSec = curr;
           }
         } else if (!isBuffering) {
           setCurrentTime((prev) => {
@@ -499,10 +567,55 @@ export function App() {
             currentTimeRef.current = next;
             return next;
           });
+          curSec = currentTimeRef.current;
+        }
+
+        const totalDuration = durationRef.current || currentTrackRef.current?.duration || 0;
+        if (currentTrackRef.current && curSec > 0) {
+          recordPlaybackProgress(currentTrackRef.current, curSec, totalDuration);
+        }
+
+        // DJ Crossfade Engine: seamlessly fade out volume and auto-trigger next song
+        const crossfadeSecs = settingsRef.current.crossfadeSeconds || 0;
+
+        if (
+          crossfadeSecs > 0 &&
+          totalDuration > 10 &&
+          curSec > 0 &&
+          !isCrossfadingRef.current &&
+          repeatModeRef.current !== 'one'
+        ) {
+          const remainingSec = totalDuration - curSec;
+          if (remainingSec <= crossfadeSecs && remainingSec > 0.1) {
+            isCrossfadingRef.current = true;
+            // Smoothly ramp down volume
+            const targetVolume = volumeRef.current || 85;
+            let step = 0;
+            const steps = Math.max(5, crossfadeSecs * 5);
+            const fadeInterval = setInterval(() => {
+              step++;
+              const fraction = Math.max(0, 1 - (step / steps));
+              const fadeVol = Math.round(targetVolume * fraction);
+              try {
+                if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === 'function') {
+                  ytPlayerRef.current.setVolume(fadeVol);
+                }
+              } catch {}
+
+              if (step >= steps) {
+                clearInterval(fadeInterval);
+                isCrossfadingRef.current = false;
+                handleNextTrackRef.current();
+              }
+            }, (crossfadeSecs * 1000) / steps);
+          }
         }
       }, 100);
     }
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      isCrossfadingRef.current = false;
+    };
   }, [isPlaying, isBuffering]);
 
   // 4. Fetch Synchronized Lyrics when Track Changes (ESHU DB -> LRCLIB Pipeline)
@@ -546,10 +659,6 @@ export function App() {
         }
       });
 
-    // Record stats
-    recordTrackPlay(currentTrack, 30);
-    setUserStats(getUserStats());
-
     return () => {
       abortController.abort();
     };
@@ -559,6 +668,26 @@ export function App() {
   const handlePlayTrack = async (trackInput: any, newQueue?: Track[]) => {
     if (!trackInput || isDomOrEvent(trackInput)) return;
     const track = sanitizeTrack(trackInput);
+
+    // If switching away from an active playing track, evaluate previous track's listening session
+    const prevTrack = currentTrackRef.current;
+    if (prevTrack && prevTrack.id !== track.id) {
+      const playedSecs = currentTimeRef.current;
+      const totalDur = durationRef.current || prevTrack.duration || 210;
+      if (isMeaningfulListen(playedSecs, totalDur)) {
+        const thresholdReached = recordMeaningfulListen(prevTrack, playedSecs, totalDur);
+        recordTrackPlay(prevTrack, Math.round(playedSecs));
+        if (thresholdReached) {
+          invalidateRecommendationCache();
+          triggerAdaptiveRecommendationUpdate('play_track_meaningful_threshold');
+        }
+      } else if (playedSecs > 0) {
+        recordPlaybackSkip(prevTrack, playedSecs, totalDur);
+        recordTrackPlay(prevTrack, Math.round(playedSecs));
+      }
+      setHistoryList(getListeningHistory());
+      setUserStats(getUserStats());
+    }
 
     // Genuinely new track detection
     const prevId = currentTrack?.id;
@@ -572,6 +701,12 @@ export function App() {
     setCurrentTime(0);
     currentTimeRef.current = 0;
     setDuration(track.duration || 200);
+
+    // Record playback start & sync history in React state
+    recordPlaybackStart(track);
+    recordTrackPlay(track, 1);
+    setHistoryList(getListeningHistory());
+    setUserStats(getUserStats());
 
     if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
       const cleanQueue = newQueue.filter((t) => t && !isDomOrEvent(t)).map(sanitizeTrack);
@@ -608,6 +743,28 @@ export function App() {
           videoId: actualVideoId,
           suggestedQuality: 'small',
         });
+        // Restore or smoothly fade in volume when crossfade is active
+        if (typeof ytPlayerRef.current.setVolume === 'function') {
+          const targetVol = volumeRef.current || 85;
+          const crossfadeSecs = settingsRef.current.crossfadeSeconds || 0;
+          if (crossfadeSecs > 0) {
+            ytPlayerRef.current.setVolume(Math.round(targetVol * 0.25));
+            let inStep = 0;
+            const inSteps = 5;
+            const inInterval = setInterval(() => {
+              inStep++;
+              const fraction = 0.25 + 0.75 * (inStep / inSteps);
+              try {
+                if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === 'function') {
+                  ytPlayerRef.current.setVolume(Math.min(100, Math.round(targetVol * fraction)));
+                }
+              } catch {}
+              if (inStep >= inSteps) clearInterval(inInterval);
+            }, 120);
+          } else {
+            ytPlayerRef.current.setVolume(targetVol);
+          }
+        }
         ytPlayerRef.current.playVideo();
       } catch (err) {
         console.warn('Error loading video by ID:', err);
@@ -659,6 +816,26 @@ export function App() {
   };
 
   const handleNextTrack = () => {
+    // Record skip or progress of current track before advancing
+    const activeTrack = currentTrackRef.current;
+    if (activeTrack) {
+      const playedSecs = currentTimeRef.current;
+      const totalDur = durationRef.current || activeTrack.duration || 210;
+      if (isMeaningfulListen(playedSecs, totalDur)) {
+        const thresholdReached = recordMeaningfulListen(activeTrack, playedSecs, totalDur);
+        recordTrackPlay(activeTrack, Math.round(playedSecs));
+        if (thresholdReached) {
+          invalidateRecommendationCache();
+          triggerAdaptiveRecommendationUpdate('next_track_meaningful_threshold');
+        }
+      } else {
+        recordPlaybackSkip(activeTrack, playedSecs, totalDur);
+        recordTrackPlay(activeTrack, Math.round(playedSecs));
+      }
+      setHistoryList(getListeningHistory());
+      setUserStats(getUserStats());
+    }
+
     const queue = playQueueRef.current;
     if (!queue || queue.length === 0) return;
     let nextIdx = (queueIndexRef.current + 1) % queue.length;
@@ -690,7 +867,26 @@ export function App() {
   };
 
   const handleTrackEnd = () => {
+    const completedTrack = currentTrackRef.current;
+    if (completedTrack) {
+      const dur = durationRef.current || completedTrack.duration || 210;
+      recordPlaybackComplete(completedTrack, dur);
+      recordTrackPlay(completedTrack, Math.round(dur));
+      setHistoryList(getListeningHistory());
+      setUserStats(getUserStats());
+
+      // Track completion as a meaningful listen & trigger live recommendation engine re-run
+      const thresholdReached = checkAndIncrementMeaningfulListens();
+      if (thresholdReached) {
+        invalidateRecommendationCache();
+        triggerAdaptiveRecommendationUpdate('track_end_meaningful_threshold');
+      }
+    }
+
     if (repeatModeRef.current === 'one') {
+      if (completedTrack) {
+        recordPlaybackReplay(completedTrack);
+      }
       if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
         ytPlayerRef.current.seekTo(0);
         ytPlayerRef.current.playVideo();
@@ -725,15 +921,18 @@ export function App() {
 
   // 6. Favorites Toggle
   const handleToggleFavorite = (trackOrEvent?: any) => {
-    if (!trackOrEvent || isDomOrEvent(trackOrEvent)) {
-      if (currentTrack && !isDomOrEvent(currentTrack)) {
-        toggleTrackFavorite(currentTrack);
-        setFavorites(getFavoriteTracks());
-      }
-      return;
+    let target = trackOrEvent;
+    if (!target || isDomOrEvent(target)) {
+      target = currentTrack;
     }
-    toggleTrackFavorite(trackOrEvent);
-    setFavorites(getFavoriteTracks());
+    if (target && !isDomOrEvent(target)) {
+      const clean = sanitizeTrack(target);
+      const isAdded = toggleTrackFavorite(clean);
+      if (isAdded) {
+        recordTasteFavorite(clean);
+      }
+      setFavorites(getFavoriteTracks());
+    }
   };
 
   // 7. Create Custom Playlist
@@ -856,12 +1055,45 @@ export function App() {
     : undefined;
 
   return (
-    <div className={`min-h-screen text-white flex flex-col font-sans selection:bg-[#FF5252] selection:text-white ${
-      settings.theme === 'amoled-noir' ? 'bg-black' : 'bg-neutral-950'
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-500 relative ${
+      settings.theme === 'liquid-glass'
+        ? 'bg-[#060814] text-white selection:bg-[#FF5252] selection:text-white'
+        : settings.theme === 'clean-light'
+          ? 'bg-[#F8F9FA] text-neutral-900 selection:bg-neutral-900 selection:text-white theme-clean-light'
+          : settings.theme === 'amoled-noir'
+            ? 'bg-black text-white selection:bg-[#FF5252] selection:text-white'
+            : 'bg-neutral-950 text-white selection:bg-[#FF5252] selection:text-white'
     }`}>
-      {/* Background YouTube Audio Stream Anchor */}
+      {/* Background iOS 26 Fluid Dynamic Ambient Blobs for Liquid Glass Refraction */}
+      {settings.theme === 'liquid-glass' && (
+        <div 
+          className="fixed inset-0 pointer-events-none -z-10 overflow-hidden" 
+          aria-hidden="true"
+        >
+          <div 
+            className="absolute -top-36 -left-36 w-[600px] h-[600px] rounded-full opacity-30 blur-[130px] transition-all duration-1000"
+            style={{
+              background: `radial-gradient(circle, ${settings.seedColor}50 0%, rgba(99, 102, 241, 0.25) 50%, transparent 70%)`
+            }}
+          />
+          <div 
+            className="absolute top-1/3 -right-36 w-[560px] h-[560px] rounded-full opacity-20 blur-[140px] transition-all duration-1000"
+            style={{
+              background: 'radial-gradient(circle, rgba(139, 92, 246, 0.35) 0%, rgba(59, 130, 246, 0.15) 50%, transparent 75%)'
+            }}
+          />
+          <div 
+            className="absolute -bottom-36 left-1/4 w-[650px] h-[650px] rounded-full opacity-25 blur-[150px] transition-all duration-1000"
+            style={{
+              background: `radial-gradient(circle, rgba(99, 102, 241, 0.3) 0%, ${settings.seedColor}25 45%, transparent 75%)`
+            }}
+          />
+        </div>
+      )}
+
+      {/* Background YouTube Audio Stream Anchor - offscreen with legitimate viewport dimensions to prevent WebView/browser background throttling */}
       <div 
-        className="fixed bottom-0 right-0 w-[1px] h-[1px] opacity-[0.01] pointer-events-none z-0 overflow-hidden" 
+        className="fixed -left-[9999px] -top-[9999px] w-[320px] h-[180px] pointer-events-none z-0 overflow-hidden" 
         aria-hidden="true"
       >
         <div id="echo-youtube-engine" />
@@ -882,6 +1114,7 @@ export function App() {
         youtubeUser={youtubeUser}
         onOpenYouTubeAuth={() => setIsYouTubeModalOpen(true)}
         seedColor={settings.seedColor}
+        theme={settings.theme}
       />
 
       {/* Main Workspace Layout */}
@@ -915,6 +1148,7 @@ export function App() {
             setActiveTab('library');
           }}
           seedColor={settings.seedColor}
+          theme={settings.theme}
         />
 
         {/* Content View Area */}
@@ -1212,6 +1446,7 @@ export function App() {
           onOpenAddToPlaylist={() => handleOpenAddToPlaylist(currentTrack)}
           onSeek={handleSeek}
           seedColor={settings.seedColor}
+          theme={settings.theme}
         />
       )}
 
@@ -1252,13 +1487,16 @@ export function App() {
           onOpenAddToPlaylist={() => handleOpenAddToPlaylist(currentTrack)}
           onOpenLyricsStudio={() => setIsAdminLyricsOpen(true)}
           seedColor={settings.seedColor}
+          theme={settings.theme}
         />
       )}
 
       {/* Create Playlist Modal */}
       {isCreatePlaylistOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className={`w-full max-w-md ${
+            settings.theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+          } rounded-3xl p-6 shadow-2xl space-y-4`}>
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-white">Create New Playlist</h3>
               <button 
@@ -1324,12 +1562,15 @@ export function App() {
         onRemoveFromPlaylist={handleRemoveTrackFromPlaylist}
         onCreatePlaylistWithTrack={handleCreatePlaylistWithTrack}
         seedColor={settings.seedColor}
+        theme={settings.theme}
       />
 
       {/* Up Next Queue Modal / Drawer */}
       {isQueueOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center sm:justify-end p-4 animate-fadeIn">
-          <div className="w-full max-w-md h-[80vh] bg-neutral-900 border border-white/15 rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
+          <div className={`w-full max-w-md h-[80vh] ${
+            settings.theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+          } rounded-3xl p-6 shadow-2xl flex flex-col justify-between`}>
             <div>
               <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
                 <div className="flex items-center gap-2">
@@ -1404,7 +1645,9 @@ export function App() {
       {/* Sleep Timer Modal */}
       {isSleepTimerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-sm bg-neutral-900 border border-white/15 rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className={`w-full max-w-sm ${
+            settings.theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+          } rounded-3xl p-6 shadow-2xl space-y-4`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Moon className="w-5 h-5 text-indigo-400" />
@@ -1455,7 +1698,9 @@ export function App() {
       {/* Notifications Modal */}
       {isNotificationsOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className={`w-full max-w-md ${
+            settings.theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+          } rounded-3xl p-6 shadow-2xl space-y-4`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Bell className="w-5 h-5 text-[#FF5252]" style={{ color: settings.seedColor }} />
@@ -1506,6 +1751,7 @@ export function App() {
         syncStatus={youtubeSyncStatus}
         seedColor={settings.seedColor}
         importedPlaylistsCount={customPlaylists.length}
+        theme={settings.theme}
       />
 
       {/* Admin / Creator Lyrics Studio Modal */}
@@ -1520,6 +1766,7 @@ export function App() {
           setLyricsData(savedLyrics);
         }}
         seedColor={settings.seedColor}
+        theme={settings.theme}
       />
     </div>
   );

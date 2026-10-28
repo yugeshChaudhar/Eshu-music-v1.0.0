@@ -31,6 +31,7 @@ interface YouTubeAuthModalProps {
   syncStatus: string | null;
   seedColor?: string;
   importedPlaylistsCount?: number;
+  theme?: string;
 }
 
 export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
@@ -45,6 +46,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
   syncStatus,
   seedColor = '#FF5252',
   importedPlaylistsCount = 0,
+  theme = 'liquid-glass',
 }) => {
   const [playlistInput, setPlaylistInput] = useState('');
   const [isImportingUrl, setIsImportingUrl] = useState(false);
@@ -95,7 +97,9 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
       <div className="fixed inset-0" onClick={onClose} />
 
       <div 
-        className="relative w-full max-w-lg rounded-3xl bg-neutral-900 border border-white/15 p-6 sm:p-8 shadow-2xl z-10 overflow-hidden space-y-5"
+        className={`relative w-full max-w-lg rounded-3xl ${
+          theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+        } p-6 sm:p-8 shadow-2xl z-10 overflow-hidden space-y-5`}
         style={{
           boxShadow: `0 20px 60px -15px ${seedColor}25`
         }}

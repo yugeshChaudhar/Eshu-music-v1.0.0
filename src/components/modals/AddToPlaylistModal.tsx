@@ -20,6 +20,7 @@ interface AddToPlaylistModalProps {
   onRemoveFromPlaylist?: (playlistId: string, trackId: string) => void;
   onCreatePlaylistWithTrack: (name: string, track: Track) => void;
   seedColor?: string;
+  theme?: string;
 }
 
 export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
@@ -31,6 +32,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   onRemoveFromPlaylist,
   onCreatePlaylistWithTrack,
   seedColor = '#FF5252',
+  theme = 'liquid-glass',
 }) => {
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [showCreateInput, setShowCreateInput] = useState(false);
@@ -38,6 +40,8 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
   if (!isOpen || !track) return null;
+
+  const isLiquidGlass = theme === 'liquid-glass';
 
   const handleToggleAdd = (pl: Playlist) => {
     const plTracks = pl.tracks || [];
@@ -79,7 +83,9 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
       <div className="fixed inset-0" onClick={onClose} />
 
       <div 
-        className="relative w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-6 shadow-2xl z-10 space-y-5 overflow-hidden"
+        className={`relative w-full max-w-md ${
+          isLiquidGlass ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+        } rounded-3xl p-6 shadow-2xl z-10 space-y-5 overflow-hidden`}
         style={{ boxShadow: `0 20px 50px -15px ${seedColor}20` }}
       >
         {/* Ambient Glow */}

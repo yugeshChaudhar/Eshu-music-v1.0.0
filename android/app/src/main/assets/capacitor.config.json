@@ -9,5 +9,10 @@
 	"android": {
 		"allowMixedContent": true,
 		"backgroundColor": "#090a0f"
+	},
+	"plugins": {
+		"CapacitorHttp": {
+			"enabled": true
+		}
 	}
 }

@@ -25,6 +25,7 @@ interface EchoNavigationProps {
   onOpenFavorites: () => void;
   onOpenOfflineTracks: () => void;
   seedColor?: string;
+  theme?: string;
 }
 
 export const EchoNavigation: React.FC<EchoNavigationProps> = ({
@@ -36,10 +37,12 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
   onOpenFavorites,
   onOpenOfflineTracks,
   seedColor = '#FF5252',
+  theme = 'liquid-glass',
 }) => {
-  const mainNavItems = [
+  const isLiquidGlass = theme === 'liquid-glass';
+  // Desktop sidebar navigation items: Search is removed to eliminate redundancy with the prominent global header search bar
+  const sidebarNavItems = [
     { id: 'home' as TabType, label: 'Home', icon: Home },
-    { id: 'search' as TabType, label: 'Search', icon: Search },
     { id: 'podcasts' as TabType, label: 'Podcasts', icon: Radio },
     { id: 'library' as TabType, label: 'Library', icon: Library },
     { id: 'equalizer' as TabType, label: 'AutoEq', icon: Sliders },
@@ -47,25 +50,39 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
   ];
 
+  // Mobile bottom navigation items (accessible on mobile screens)
+  const mobileNavItems = [
+    { id: 'home' as TabType, label: 'Home', icon: Home },
+    { id: 'search' as TabType, label: 'Search', icon: Search },
+    { id: 'library' as TabType, label: 'Library', icon: Library },
+    { id: 'podcasts' as TabType, label: 'Podcasts', icon: Radio },
+    { id: 'equalizer' as TabType, label: 'AutoEq', icon: Sliders },
+    { id: 'settings' as TabType, label: 'Settings', icon: Settings },
+  ];
+
   return (
     <>
       {/* 1. Desktop Left Navigation Sidebar */}
-      <aside className="hidden md:flex flex-col w-60 lg:w-64 bg-neutral-950/60 border-r border-white/10 h-[calc(100vh-61px)] p-4 flex-shrink-0 select-none overflow-y-auto">
+      <aside className={`hidden md:flex flex-col w-60 lg:w-64 ${
+        isLiquidGlass ? 'liquid-glass-sidebar' : 'bg-neutral-950/60 border-r border-white/10'
+      } h-[calc(100vh-61px)] p-4 flex-shrink-0 select-none overflow-y-auto`}>
         {/* Main Tab Links */}
         <div className="space-y-1 mb-6">
           <div className="px-3 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
             Menu
           </div>
-          {mainNavItems.map((item) => {
+          {sidebarNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group relative ${
+                className={`btn-nav group relative ${
                   isActive
-                    ? 'text-white bg-white/10 shadow-sm'
+                    ? isLiquidGlass
+                      ? 'text-white bg-white/15 border border-white/20 shadow-md'
+                      : 'text-white bg-white/10 shadow-sm'
                     : 'text-neutral-400 hover:text-white hover:bg-white/5'
                 }`}
               >
@@ -95,7 +112,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
           
           <button
             onClick={onOpenFavorites}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-neutral-300 hover:text-white hover:bg-white/5 transition-all group"
+            className="btn-nav text-neutral-300 hover:text-white hover:bg-white/5 group"
           >
             <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-[#FF4081] to-[#FF5252] flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
               <Heart className="w-3.5 h-3.5 fill-white" />
@@ -105,7 +122,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
 
           <button
             onClick={onOpenOfflineTracks}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-neutral-300 hover:text-white hover:bg-white/5 transition-all group"
+            className="btn-nav text-neutral-300 hover:text-white hover:bg-white/5 group"
           >
             <div className="w-7 h-7 rounded-xl bg-emerald-600/30 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
               <Download className="w-3.5 h-3.5" />
@@ -122,8 +139,9 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
             </span>
             <button
               onClick={onCreatePlaylistModal}
-              className="p-1 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
+              className="btn-icon !p-1 !rounded-lg"
               title="Create New Playlist"
+              aria-label="Create New Playlist"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -139,7 +157,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
                 <button
                   key={pl.id}
                   onClick={() => onSelectPlaylist(pl)}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-neutral-400 hover:text-white hover:bg-white/5 transition-colors text-left truncate group"
+                  className="btn-nav text-neutral-400 hover:text-white hover:bg-white/5 text-left truncate group"
                 >
                   <FolderHeart className="w-4 h-4 text-neutral-400 group-hover:text-white flex-shrink-0" />
                   <span className="truncate flex-1">{pl.title}</span>
@@ -165,24 +183,40 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
       </aside>
 
       {/* 2. Mobile Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-neutral-950/95 backdrop-blur-2xl border-t border-white/10 px-2 py-1.5 flex items-center justify-around">
-        {mainNavItems.slice(0, 5).map((item) => {
+      <nav 
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-40 px-1 py-1 flex items-center justify-around transition-all ${
+          isLiquidGlass
+            ? 'liquid-glass-nav'
+            : 'bg-neutral-950/95 backdrop-blur-2xl border-t border-white/10'
+        }`}
+        style={{ paddingBottom: 'calc(0.375rem + env(safe-area-inset-bottom, 0px))' }}
+        aria-label="Mobile Bottom Navigation"
+      >
+        {mobileNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
             <button
               key={item.id}
               onClick={() => onTabChange(item.id)}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
-                isActive ? 'text-white scale-105' : 'text-neutral-400 hover:text-neutral-200'
+              className={`flex-1 min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                isActive 
+                  ? 'text-white scale-105' 
+                  : 'text-neutral-400 hover:text-neutral-200'
               }`}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
             >
-              <Icon 
-                className="w-5 h-5 mb-0.5" 
-                style={{ color: isActive ? seedColor : undefined }}
-              />
+              <div className={`p-1 rounded-xl transition-all ${
+                isActive && isLiquidGlass ? 'bg-white/10 shadow-xs' : ''
+              }`}>
+                <Icon 
+                  className="w-4 h-4 sm:w-5 sm:h-5 mb-0.5" 
+                  style={{ color: isActive ? seedColor : undefined }} 
+                />
+              </div>
               <span 
-                className="text-[10px] font-semibold tracking-tight"
+                className="text-[9px] sm:text-[10px] font-semibold tracking-tight truncate max-w-[54px]"
                 style={{ color: isActive ? seedColor : undefined }}
               >
                 {item.label}

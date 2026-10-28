@@ -1,6 +1,7 @@
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Track } from '../types';
-import { ECHO_QUICK_PICKS, COUNTRY_CHARTS, ECHO_TOP_ARTISTS } from '../data/echoMusicData';
-import { apiUrl } from './apiConfig';
+import { ECHO_QUICK_PICKS, COUNTRY_CHARTS } from '../data/echoMusicData';
+import { apiUrl, isNativeAndroid } from './apiConfig';
 
 export interface SearchResponse {
   results: Track[];
@@ -12,6 +13,16 @@ export interface SearchResponse {
 // In-memory cache for fast repeated queries
 const searchCache = new Map<string, Track[]>();
 const resolvedVideoIdCache = new Map<string, string>();
+
+function parseDurationString(str?: string): number {
+  if (!str) return 210;
+  const parts = str.split(':').map((p) => parseInt(p, 10));
+  if (parts.some(isNaN)) return 210;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 1) return parts[0];
+  return 210;
+}
 
 /**
  * Check and extract YouTube videoId or playlistId from any text / link
@@ -80,6 +91,127 @@ export async function fetchDirectYouTubeTrack(videoId: string): Promise<Track> {
 }
 
 /**
+ * Direct YouTube Innertube search.
+ * On native Android Capacitor, uses CapacitorHttp to bypass CORS natively.
+ * Returns playable tracks with genuine 11-char YouTube video IDs.
+ */
+export async function searchDirectYouTube(query: string): Promise<Track[]> {
+  try {
+    const payload = {
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20240313.01.00',
+          hl: 'en',
+          gl: 'US',
+        },
+      },
+      query,
+    };
+
+    let data: any = null;
+    const url = 'https://www.youtube.com/youtubei/v1/search';
+
+    if (isNativeAndroid() && Capacitor.isNativePlatform()) {
+      try {
+        console.log('[EshuMusic Search] Querying direct YouTube via CapacitorHttp native transport');
+        const nativeRes = await CapacitorHttp.request({
+          url,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          },
+          data: payload,
+        });
+        console.log('[EshuMusic Search] CapacitorHttp YouTube status:', nativeRes.status);
+        if (nativeRes.status === 200) {
+          data = typeof nativeRes.data === 'string' ? JSON.parse(nativeRes.data) : nativeRes.data;
+        }
+      } catch (err) {
+        console.warn('[EshuMusic Search] Native CapacitorHttp search failed, falling back to fetch:', err);
+      }
+    }
+
+    if (!data) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6500);
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify(payload),
+      });
+      clearTimeout(timeout);
+      console.log('[EshuMusic Search] Direct YouTube fetch status:', res.status);
+      if (res.ok) {
+        data = await res.json();
+      }
+    }
+
+    if (!data) return [];
+
+    const sections =
+      data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+
+    const results: Track[] = [];
+
+    for (const section of sections) {
+      const items = section?.itemSectionRenderer?.contents || [];
+      for (const item of items) {
+        if (item.videoRenderer) {
+          const v = item.videoRenderer;
+          const videoId = v.videoId;
+          if (!videoId) continue;
+
+          let title =
+            v.title?.runs?.[0]?.text ||
+            v.title?.simpleText ||
+            'Unknown Track';
+          let artist =
+            v.ownerText?.runs?.[0]?.text ||
+            v.shortBylineText?.runs?.[0]?.text ||
+            'YouTube Artist';
+
+          const durationStr = v.lengthText?.simpleText || v.lengthText?.runs?.[0]?.text;
+          const duration = parseDurationString(durationStr);
+          const views = v.viewCountText?.simpleText || v.shortViewCountText?.simpleText;
+
+          if (title.includes(' - ') && artist.toLowerCase().includes('topic')) {
+            const split = title.split(' - ');
+            artist = split[0].trim();
+            title = split.slice(1).join(' - ').trim();
+          }
+
+          results.push({
+            id: videoId,
+            title,
+            artist,
+            duration,
+            thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            views,
+            videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          });
+
+          if (results.length >= 25) break;
+        }
+      }
+      if (results.length >= 25) break;
+    }
+
+    return results;
+  } catch (err) {
+    console.warn('[EshuMusic Search] Direct YouTube search error:', err);
+    return [];
+  }
+}
+
+/**
  * Try searching via Invidious / Piped public instances (CORS enabled)
  */
 async function searchInvidiousInstances(query: string): Promise<Track[]> {
@@ -93,7 +225,7 @@ async function searchInvidiousInstances(query: string): Promise<Track[]> {
   for (const baseUrl of instances) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
+      const timeout = setTimeout(() => controller.abort(), 2000);
 
       const url = `${baseUrl}?q=${encodeURIComponent(query)}&type=video&page=1`;
       const res = await fetch(url, { signal: controller.signal });
@@ -142,6 +274,7 @@ async function searchITunesAPI(query: string): Promise<Track[]> {
   try {
     const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=25`;
     const res = await fetch(itunesUrl);
+    console.log('[EshuMusic Search] iTunes search response status:', res.status);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.results) && data.results.length > 0) {
@@ -158,7 +291,7 @@ async function searchITunesAPI(query: string): Promise<Track[]> {
       }
     }
   } catch (err) {
-    console.warn('iTunes search failed:', err);
+    console.warn('[EshuMusic Search] iTunes search failed:', err);
   }
   return [];
 }
@@ -188,7 +321,7 @@ function searchStaticCatalog(query: string): Track[] {
 }
 
 /**
- * Main Universal Search Function (Works everywhere: Vercel, Node, Static)
+ * Main Universal Search Function (Works seamlessly on Web and native Android)
  */
 export async function universalSearch(query: string): Promise<SearchResponse> {
   const trimmed = query.trim();
@@ -217,38 +350,54 @@ export async function universalSearch(query: string): Promise<SearchResponse> {
     };
   }
 
-  // 2. Try Node/Vercel /api/search endpoint first
-  try {
-    const apiRes = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(trimmed)}`));
-    const contentType = apiRes.headers.get('content-type') || '';
-    if (apiRes.ok && contentType.includes('application/json')) {
-      const data = await apiRes.json();
-      if (Array.isArray(data.results) && data.results.length > 0) {
-        const formatted: Track[] = data.results.map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          artist: item.artist || 'YouTube Artist',
-          album: item.album,
-          duration: item.duration || 210,
-          thumbnail: item.thumbnail || `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
-          views: item.views,
-          videoUrl: item.videoUrl || `https://www.youtube.com/watch?v=${item.id}`,
-        }));
+  // 2. Try configured backend API /api/search (if apiUrl is valid and not empty)
+  const backendSearchUrl = apiUrl(`/api/search?q=${encodeURIComponent(trimmed)}`);
+  if (backendSearchUrl) {
+    try {
+      console.log('[EshuMusic Search] Requesting backend search URL:', backendSearchUrl);
+      const apiRes = await fetch(backendSearchUrl);
+      console.log('[EshuMusic Search] Backend search status:', apiRes.status);
+      const contentType = apiRes.headers.get('content-type') || '';
+      if (apiRes.ok && contentType.includes('application/json')) {
+        const data = await apiRes.json();
+        if (Array.isArray(data.results) && data.results.length > 0) {
+          const formatted: Track[] = data.results.map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            artist: item.artist || 'YouTube Artist',
+            album: item.album,
+            duration: item.duration || 210,
+            thumbnail: item.thumbnail || `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
+            views: item.views,
+            videoUrl: item.videoUrl || `https://www.youtube.com/watch?v=${item.id}`,
+          }));
 
-        searchCache.set(cacheKey, formatted);
-        return {
-          results: formatted,
-          isDirectLink: data.isDirectLink,
-          directTrack: data.isDirectLink ? formatted[0] : null,
-          source: 'backend-api',
-        };
+          searchCache.set(cacheKey, formatted);
+          return {
+            results: formatted,
+            isDirectLink: data.isDirectLink,
+            directTrack: data.isDirectLink ? formatted[0] : null,
+            source: 'backend-api',
+          };
+        }
       }
+    } catch (err) {
+      console.warn('[EshuMusic Search] Backend search API unavailable:', err);
     }
-  } catch (err) {
-    // Backend endpoint not responding or returning HTML on static Vercel
   }
 
-  // 3. Try Invidious / Piped direct live YouTube search
+  // 3. Direct YouTube Search via Innertube (works natively on Android via CapacitorHttp)
+  const ytResults = await searchDirectYouTube(trimmed);
+  if (ytResults.length > 0) {
+    console.log('[EshuMusic Search] Direct YouTube search succeeded with', ytResults.length, 'tracks');
+    searchCache.set(cacheKey, ytResults);
+    return {
+      results: ytResults,
+      source: 'youtube-live',
+    };
+  }
+
+  // 4. Try Invidious / Piped direct live YouTube search
   const invidiousResults = await searchInvidiousInstances(trimmed);
   if (invidiousResults.length > 0) {
     searchCache.set(cacheKey, invidiousResults);
@@ -258,7 +407,7 @@ export async function universalSearch(query: string): Promise<SearchResponse> {
     };
   }
 
-  // 4. Try iTunes / Apple Music search API
+  // 5. Try iTunes / Apple Music search API
   const itunesResults = await searchITunesAPI(trimmed);
   if (itunesResults.length > 0) {
     searchCache.set(cacheKey, itunesResults);
@@ -268,7 +417,7 @@ export async function universalSearch(query: string): Promise<SearchResponse> {
     };
   }
 
-  // 5. Fallback to bundled catalog
+  // 6. Fallback to bundled catalog
   const staticResults = searchStaticCatalog(trimmed);
   searchCache.set(cacheKey, staticResults);
   return {
@@ -294,24 +443,43 @@ export async function resolveRealVideoId(track: Track): Promise<string> {
     return resolvedVideoIdCache.get(cacheKey)!;
   }
 
-  // Query search for the title and artist
+  console.log(`[EshuMusic Search] Resolving YouTube video ID for track: "${track.title}" by "${track.artist}"`);
+
+  // Direct Innertube YouTube resolution
+  try {
+    const directResults = await searchDirectYouTube(`${track.artist} ${track.title} audio`);
+    if (directResults.length > 0) {
+      const best = directResults.find((t) => /^[a-zA-Z0-9_-]{11}$/.test(t.id));
+      if (best) {
+        console.log(`[EshuMusic Search] Successfully resolved "${track.title}" to YouTube ID: ${best.id}`);
+        resolvedVideoIdCache.set(cacheKey, best.id);
+        return best.id;
+      }
+    }
+  } catch (err) {
+    console.warn('[EshuMusic Search] Direct resolution search failed:', err);
+  }
+
+  // Secondary fallback: Universal search query
   try {
     const searchRes = await universalSearch(`${track.artist} ${track.title} audio`);
     if (searchRes.results && searchRes.results.length > 0) {
       const best = searchRes.results.find((t) => /^[a-zA-Z0-9_-]{11}$/.test(t.id));
       if (best) {
+        console.log(`[EshuMusic Search] Universal search resolved "${track.title}" to YouTube ID: ${best.id}`);
         resolvedVideoIdCache.set(cacheKey, best.id);
         return best.id;
       }
     }
   } catch {}
 
-  // Secondary fallback: Try searching static catalog for matching artist/title
+  // Third fallback: Try searching static catalog for matching artist/title
   const staticMatch = searchStaticCatalog(`${track.artist} ${track.title}`);
   if (staticMatch.length > 0 && /^[a-zA-Z0-9_-]{11}$/.test(staticMatch[0].id)) {
     return staticMatch[0].id;
   }
 
+  console.warn(`[EshuMusic Search] Unable to resolve YouTube video ID for "${track.title}", using safe fallback video`);
   return 'fJ9rUzIMcZQ';
 }
 
@@ -322,17 +490,20 @@ export async function fetchLiveSearchSuggestions(query: string): Promise<string[
   const trimmed = query.trim();
   if (!trimmed || trimmed.length < 2) return [];
 
-  // Try local /api/search/suggestions
-  try {
-    const res = await fetch(apiUrl(`/api/search/suggestions?q=${encodeURIComponent(trimmed)}`));
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('application/json')) {
-      const data = await res.json();
-      if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
-        return data.suggestions.slice(0, 6);
+  // Try local /api/search/suggestions if backend is available
+  const suggestionsUrl = apiUrl(`/api/search/suggestions?q=${encodeURIComponent(trimmed)}`);
+  if (suggestionsUrl) {
+    try {
+      const res = await fetch(suggestionsUrl);
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          return data.suggestions.slice(0, 6);
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // Fallback to Google YouTube suggestions API (supports JSON client=firefox)
   try {

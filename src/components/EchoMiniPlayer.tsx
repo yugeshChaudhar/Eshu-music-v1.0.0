@@ -31,6 +31,7 @@ interface EchoMiniPlayerProps {
   onOpenAddToPlaylist?: () => void;
   onSeek: (seconds: number) => void;
   seedColor?: string;
+  theme?: string;
 }
 
 export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
@@ -51,11 +52,13 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
   onOpenAddToPlaylist,
   onSeek,
   seedColor = '#FF5252',
+  theme = 'liquid-glass',
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
 
   if (!currentTrack) return null;
 
+  const isLiquidGlass = theme === 'liquid-glass';
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -69,7 +72,7 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
 
   return (
     <div 
-      className="fixed bottom-16 md:bottom-4 left-0 right-0 z-40 px-2 sm:px-6 pointer-events-none transition-all duration-300 ease-out"
+      className="fixed bottom-[68px] md:bottom-4 left-0 right-0 z-40 px-2 sm:px-6 pointer-events-none transition-all duration-300 ease-out"
       style={{
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px))',
       }}
@@ -77,7 +80,11 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
       <div className="max-w-4xl mx-auto pointer-events-auto">
         <div 
           onClick={onOpenFullPlayer}
-          className="relative overflow-hidden rounded-3xl bg-neutral-900/92 hover:bg-neutral-900/98 active:scale-[0.985] backdrop-blur-2xl border border-white/15 shadow-2xl p-2.5 sm:p-3 transition-all duration-200 cursor-pointer group select-none animate-fadeIn"
+          className={`relative overflow-hidden rounded-3xl active:scale-[0.985] p-2.5 sm:p-3 transition-all duration-200 cursor-pointer group select-none animate-fadeIn ${
+            isLiquidGlass
+              ? 'liquid-glass-player'
+              : 'bg-neutral-900/92 hover:bg-neutral-900/98 backdrop-blur-2xl border border-white/15 shadow-2xl'
+          }`}
           style={{ willChange: 'transform, opacity' }}
         >
           {/* Subtle Ambient Glow */}
@@ -132,8 +139,9 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                     e.stopPropagation();
                     (onOpenAddToPlaylist || onAddToPlaylist)?.();
                   }}
-                  className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                  className="btn-icon !bg-transparent border-transparent hover:!bg-white/10"
                   title="Add to Playlist"
+                  aria-label="Add current track to playlist"
                 >
                   <FolderPlus className="w-4 h-4" />
                 </button>
@@ -145,8 +153,9 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                   e.stopPropagation();
                   onToggleFavorite();
                 }}
-                className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="btn-icon !bg-transparent border-transparent hover:!bg-white/10"
                 title="Like Song"
+                aria-label={isFavorite ? "Remove like" : "Like song"}
               >
                 <Heart 
                   className={`w-4 h-4 transition-transform active:scale-125 ${
@@ -161,8 +170,9 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                   e.stopPropagation();
                   onOpenLyrics();
                 }}
-                className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors hidden sm:block"
+                className="btn-icon !bg-transparent border-transparent hover:!bg-white/10 hidden sm:inline-flex"
                 title="Synced Lyrics"
+                aria-label="View synced lyrics"
               >
                 <Mic2 className="w-4 h-4" />
               </button>
@@ -173,9 +183,10 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                   e.stopPropagation();
                   onTogglePlay();
                 }}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center text-black font-bold shadow-lg transition-transform active:scale-95"
+                className="btn-primary !w-10 !h-10 !p-0 !rounded-2xl"
                 style={{ backgroundColor: seedColor }}
                 title={isPlaying ? 'Pause' : 'Play'}
+                aria-label={isPlaying ? 'Pause playback' : 'Start playback'}
               >
                 {isBuffering ? (
                   <Loader2 className="w-5 h-5 text-black animate-spin" />
@@ -192,8 +203,9 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                   e.stopPropagation();
                   onNextTrack();
                 }}
-                className="p-2 rounded-xl text-neutral-300 hover:text-white hover:bg-white/10 transition-colors"
+                className="btn-icon !bg-transparent border-transparent hover:!bg-white/10"
                 title="Next Track"
+                aria-label="Skip to next track"
               >
                 <SkipForward className="w-4 h-4" />
               </button>
@@ -204,8 +216,9 @@ export const EchoMiniPlayer: React.FC<EchoMiniPlayerProps> = ({
                   e.stopPropagation();
                   onOpenFullPlayer();
                 }}
-                className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors hidden sm:block"
+                className="btn-icon !bg-transparent border-transparent hover:!bg-white/10 hidden sm:inline-flex"
                 title="Expand Now Playing"
+                aria-label="Expand now playing player"
               >
                 <Maximize2 className="w-4 h-4" />
               </button>

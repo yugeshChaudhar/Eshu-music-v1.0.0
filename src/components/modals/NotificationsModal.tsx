@@ -4,13 +4,17 @@ import { X, Sparkles, ShieldCheck, Mic2, Disc, Github, Check } from 'lucide-reac
 interface NotificationsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  theme?: string;
 }
 
 export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   isOpen,
   onClose,
+  theme = 'liquid-glass',
 }) => {
   if (!isOpen) return null;
+
+  const isLiquidGlass = theme === 'liquid-glass';
 
   const updates = [
     {
@@ -38,7 +42,9 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none">
-      <div className="bg-neutral-900 border border-white/15 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div className={`${
+        isLiquidGlass ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/15'
+      } rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4`}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-[#8ECAE6]" />

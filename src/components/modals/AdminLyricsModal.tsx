@@ -38,6 +38,7 @@ interface AdminLyricsModalProps {
   onTogglePlay?: () => void;
   onLyricsSaved?: (lyricsData: LyricsData) => void;
   initialLyricsData?: LyricsData | null;
+  theme?: string;
 }
 
 type TabMode = 'edit' | 'studio' | 'preview' | 'database';
@@ -53,6 +54,7 @@ export const AdminLyricsModal: React.FC<AdminLyricsModalProps> = ({
   onTogglePlay,
   onLyricsSaved,
   initialLyricsData,
+  theme = 'liquid-glass',
 }) => {
   const [activeTab, setActiveTab] = useState<TabMode>('edit');
   const [inputType, setInputType] = useState<LyricInputType>('lrc');
@@ -383,7 +385,9 @@ export const AdminLyricsModal: React.FC<AdminLyricsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden text-neutral-200">
+      <div className={`relative w-full max-w-4xl max-h-[92vh] flex flex-col ${
+        theme === 'liquid-glass' ? 'liquid-glass-modal' : 'bg-neutral-900 border border-white/10'
+      } rounded-2xl shadow-2xl overflow-hidden text-neutral-200`}>
         
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-neutral-950/60">

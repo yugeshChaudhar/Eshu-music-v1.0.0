@@ -10,6 +10,159 @@
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+  /* Shared Button Design System: 5 Cohesive Variants */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 rounded-2xl font-bold text-xs sm:text-sm text-black transition-all active:scale-95 shadow-xl hover:brightness-110 cursor-pointer;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 rounded-2xl bg-white/10 hover:bg-white/15 active:bg-white/20 border border-white/15 text-xs sm:text-sm font-bold text-white transition-all active:scale-95 cursor-pointer;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-white transition-colors cursor-pointer;
+  }
+
+  .btn-icon {
+    @apply inline-flex items-center justify-center p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-white/10 transition-all active:scale-95 cursor-pointer;
+  }
+
+  .btn-nav {
+    @apply w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer;
+  }
+}
+
+/* ==========================================================================
+   ESHU MUSIC — AUTHENTIC iOS 26 LIQUID GLASS VISUAL SYSTEM
+   Designed with Apple-inspired specular refraction, dual rim highlights, 
+   fluid depth, and zero readability loss.
+   ========================================================================== */
+
+/* 1. Liquid Glass Sticky Header */
+.liquid-glass-header {
+  background: rgba(12, 16, 29, 0.72) !important;
+  backdrop-filter: blur(24px) saturate(190%) contrast(102%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.06), 0 8px 24px -4px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* 2. Liquid Glass Floating Bottom Navigation Bar */
+.liquid-glass-nav {
+  background: rgba(13, 17, 32, 0.76) !important;
+  backdrop-filter: blur(28px) saturate(200%) contrast(104%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(200%) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.22), inset 0 0.5px 0 0 rgba(255, 255, 255, 0.35), 0 -10px 36px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 3. Liquid Glass Floating MiniPlayer Capsule */
+.liquid-glass-player {
+  background: rgba(16, 21, 38, 0.78) !important;
+  backdrop-filter: blur(28px) saturate(200%) contrast(105%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(200%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.25), 0 16px 48px -8px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* 4. Liquid Glass Full Player Sheet & Modals */
+.liquid-glass-sheet {
+  background: rgba(11, 15, 28, 0.85) !important;
+  backdrop-filter: blur(36px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(200%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.25), 0 25px 60px -15px rgba(0, 0, 0, 0.7) !important;
+}
+
+.liquid-glass-modal {
+  background: rgba(14, 19, 34, 0.82) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.26), inset 0 -1px 0 0 rgba(0, 0, 0, 0.2), 0 24px 64px -12px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* 5. Liquid Glass Desktop Sidebar */
+.liquid-glass-sidebar {
+  background: rgba(10, 13, 24, 0.60) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: inset -1px 0 0 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+/* 6. Liquid Glass Segmented Controls (View switcher, tabs) */
+.liquid-glass-segment {
+  background: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(0, 0, 0, 0.25) !important;
+}
+
+.liquid-glass-segment-active {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  color: #ffffff !important;
+}
+
+/* 7. Liquid Glass Buttons & Circular Triggers */
+.liquid-glass-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.2) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.liquid-glass-btn:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+}
+.liquid-glass-btn:active {
+  transform: scale(0.96) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* 8. Liquid Glass Search Capsule */
+.liquid-glass-search {
+  background: rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.1) !important;
+  transition: all 0.2s ease !important;
+}
+.liquid-glass-search:hover,
+.liquid-glass-search:focus-within {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.26) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.15), 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* 9. Light Theme Support (Clean Light & Liquid Glass Light) */
+.theme-clean-light .liquid-glass-header {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.9), 0 4px 20px -2px rgba(0, 0, 0, 0.05) !important;
+}
+.theme-clean-light .liquid-glass-nav {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.95), 0 -8px 24px rgba(0, 0, 0, 0.06) !important;
+}
+.theme-clean-light .liquid-glass-player {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 1), 0 14px 36px -4px rgba(0, 0, 0, 0.12) !important;
+}
+.theme-clean-light .liquid-glass-sheet,
+.theme-clean-light .liquid-glass-modal {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.95) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 1), 0 20px 48px -8px rgba(0, 0, 0, 0.14) !important;
 }
 
 @keyframes spin {

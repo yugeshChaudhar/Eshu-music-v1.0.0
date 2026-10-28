@@ -98,22 +98,37 @@ export const SimpYouTubePlayer: React.FC<SimpYouTubePlayerProps> = ({
       const target = document.getElementById('simp-yt-player-target');
       if (!target) return;
 
+      const isLocalOrNative = typeof window !== 'undefined' && (
+        !window.location.origin ||
+        window.location.origin.includes('localhost') ||
+        window.location.origin.startsWith('capacitor:') ||
+        window.location.origin.startsWith('file:')
+      );
+
+      const playerVars: Record<string, any> = {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        iv_load_policy: 3,
+        modestbranding: 1,
+        rel: 0,
+        showinfo: 0,
+        playsinline: 1,
+        enablejsapi: 1,
+      };
+
+      if (!isLocalOrNative && window.location.origin.startsWith('http')) {
+        playerVars.origin = window.location.origin;
+      } else {
+        playerVars.widget_referrer = 'https://www.youtube.com';
+      }
+
       playerRef.current = new window.YT.Player('simp-yt-player-target', {
         height: '100%',
         width: '100%',
-        playerVars: {
-          autoplay: 0,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          iv_load_policy: 3,
-          modestbranding: 1,
-          rel: 0,
-          showinfo: 0,
-          playsinline: 1,
-          enablejsapi: 1,
-          origin: window.location.origin,
-        },
+        host: 'https://www.youtube.com',
+        playerVars,
         events: {
           onReady: (event: any) => {
             setIsReady(true);

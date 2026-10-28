@@ -77,6 +77,7 @@ interface EchoFullPlayerProps {
   onOpenSleepTimer: () => void;
   onOpenLyricsStudio?: () => void;
   seedColor?: string;
+  theme?: string;
 }
 
 export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
@@ -110,7 +111,9 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   onOpenSleepTimer,
   onOpenLyricsStudio,
   seedColor = '#FF5252',
+  theme = 'liquid-glass',
 }) => {
+  const isLiquidGlass = theme === 'liquid-glass';
   const [viewMode, setViewMode] = useState<PlayerViewMode>(() => {
     if (initialViewMode && initialViewMode !== 'artwork') {
       return initialViewMode;
@@ -202,16 +205,16 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
     }, 260);
   };
 
-  // Pointer event listeners for interactive slide-down gesture
+  // Pointer & Touch event listeners for interactive slide-down gesture
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const onPointerDown = (e: PointerEvent) => {
-      if (isExitingRef.current) return;
+    let activePointerId: number | null = null;
 
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
+    const startDrag = (clientX: number, clientY: number, target: HTMLElement | null, pointerId?: number) => {
+      if (isExitingRef.current) return false;
+      if (!target) return false;
 
       // Exclude interactive controls from initiating drag
       if (
@@ -222,31 +225,39 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         target.closest('textarea') ||
         target.closest('[data-no-drag="true"]')
       ) {
-        return;
+        return false;
       }
 
       // Check if user is scrolling inside lyrics
       const scrollableLyrics = target.closest('.lyrics-scroll-container');
       if (scrollableLyrics && scrollableLyrics.scrollTop > 5) {
         // Allow native vertical scrolling of lyrics
-        return;
+        return false;
       }
 
       isDraggingRef.current = true;
-      startYRef.current = e.clientY;
-      startXRef.current = e.clientX;
+      startYRef.current = clientY;
+      startXRef.current = clientX;
       startTimeRef.current = Date.now();
       isDirectionLockedRef.current = false;
       isHorizontallyLockedRef.current = false;
 
+      if (pointerId !== undefined) {
+        activePointerId = pointerId;
+        try {
+          el.setPointerCapture(pointerId);
+        } catch {}
+      }
+
       el.style.willChange = 'transform, opacity';
+      return true;
     };
 
-    const onPointerMove = (e: PointerEvent) => {
+    const updateDrag = (clientX: number, clientY: number, cancelable: boolean, preventDefault: () => void) => {
       if (!isDraggingRef.current || isExitingRef.current) return;
 
-      const deltaY = e.clientY - startYRef.current;
-      const deltaX = e.clientX - startXRef.current;
+      const deltaY = clientY - startYRef.current;
+      const deltaX = clientX - startXRef.current;
 
       // Determine initial gesture direction
       if (!isDirectionLockedRef.current) {
@@ -255,7 +266,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           isDirectionLockedRef.current = true;
           return;
         }
-        if (Math.abs(deltaY) > 8 && Math.abs(deltaY) > Math.abs(deltaX)) {
+        if (Math.abs(deltaY) > 6 && Math.abs(deltaY) > Math.abs(deltaX)) {
           isDirectionLockedRef.current = true;
         }
       }
@@ -263,6 +274,10 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
       if (isHorizontallyLockedRef.current) return;
 
       if (deltaY > 0) {
+        // Prevent default browser/WebView scrolling or pull-to-refresh
+        if (cancelable) {
+          preventDefault();
+        }
         // Downward drag follows finger with subtle scale & opacity feedback
         el.style.transition = 'none';
         const scale = Math.max(0.92, 1 - (deltaY / 2800));
@@ -270,17 +285,24 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         el.style.transform = `translate3d(0, ${deltaY}px, 0) scale(${scale})`;
         el.style.opacity = `${opacity}`;
       } else {
-        // Resistance for upward drag
+        // Subtle resistance for upward drag
         el.style.transition = 'none';
         const resistanceY = deltaY * 0.12;
         el.style.transform = `translate3d(0, ${resistanceY}px, 0)`;
       }
     };
 
-    const onPointerUpOrCancel = (e: PointerEvent) => {
+    const endDrag = (clientY: number) => {
       if (!isDraggingRef.current || isExitingRef.current) {
         isDraggingRef.current = false;
         return;
+      }
+
+      if (activePointerId !== null) {
+        try {
+          el.releasePointerCapture(activePointerId);
+        } catch {}
+        activePointerId = null;
       }
 
       isDraggingRef.current = false;
@@ -290,42 +312,89 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         return;
       }
 
-      const totalDeltaY = e.clientY - startYRef.current;
+      const totalDeltaY = clientY - startYRef.current;
       const durationMs = Math.max(1, Date.now() - startTimeRef.current);
       const velocity = totalDeltaY / durationMs; // px/ms
 
-      // Threshold: 100px downward movement OR fast flick down (velocity > 0.4 px/ms)
-      if (totalDeltaY > 100 || (totalDeltaY > 40 && velocity > 0.4)) {
+      // Threshold: 80px downward movement OR flick down with velocity > 0.35 px/ms
+      if (totalDeltaY > 80 || (totalDeltaY > 30 && velocity > 0.35)) {
         isExitingRef.current = true;
-        el.style.transition = 'transform 260ms cubic-bezier(0.25, 1, 0.5, 1), opacity 260ms ease-in';
+        el.style.transition = 'transform 250ms cubic-bezier(0.25, 1, 0.5, 1), opacity 250ms ease-in';
         el.style.transform = 'translate3d(0, 100%, 0) scale(0.94)';
         el.style.opacity = '0.5';
         setTimeout(() => {
           onClose();
-        }, 260);
+        }, 250);
       } else {
         // Animate smoothly back to full position
-        el.style.transition = 'transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 280ms ease-out';
+        el.style.transition = 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease-out';
         el.style.transform = 'translate3d(0, 0, 0) scale(1)';
         el.style.opacity = '1';
         setTimeout(() => {
           if (el && !isDraggingRef.current && !isExitingRef.current) {
             el.style.willChange = 'auto';
           }
-        }, 300);
+        }, 280);
+      }
+    };
+
+    // Pointer event listeners
+    const onPointerDown = (e: PointerEvent) => {
+      startDrag(e.clientX, e.clientY, e.target as HTMLElement | null, e.pointerId);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      updateDrag(e.clientX, e.clientY, e.cancelable, () => e.preventDefault());
+    };
+
+    const onPointerUpOrCancel = (e: PointerEvent) => {
+      endDrag(e.clientY);
+    };
+
+    // Touch event fallback listeners for older Android WebViews
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        startDrag(touch.clientX, touch.clientY, e.target as HTMLElement | null);
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        updateDrag(touch.clientX, touch.clientY, e.cancelable, () => e.preventDefault());
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      const touch = e.changedTouches[0];
+      if (touch) {
+        endDrag(touch.clientY);
+      } else {
+        endDrag(startYRef.current);
       }
     };
 
     el.addEventListener('pointerdown', onPointerDown, { passive: true });
-    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUpOrCancel, { passive: true });
     window.addEventListener('pointercancel', onPointerUpOrCancel, { passive: true });
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: true });
 
     return () => {
       el.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUpOrCancel);
       window.removeEventListener('pointercancel', onPointerUpOrCancel);
+
+      el.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
     };
   }, [onClose]);
 
@@ -374,7 +443,10 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-neutral-950 flex flex-col justify-between p-3.5 sm:p-8 select-none overflow-hidden touch-pan-y"
+      id="echo-full-player-modal"
+      className={`fixed inset-0 z-50 flex flex-col justify-between p-3.5 sm:p-8 select-none overflow-hidden touch-none ${
+        isLiquidGlass ? 'liquid-glass-sheet' : 'bg-neutral-950'
+      }`}
       style={{
         paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
         paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
@@ -382,7 +454,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
     >
       {/* Background Dynamic Ambient Backdrops */}
       <div 
-        className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-3xl scale-125 transition-all duration-1000 pointer-events-none"
+        className="absolute inset-0 bg-cover bg-center opacity-25 filter blur-3xl scale-125 transition-all duration-1000 pointer-events-none"
         style={{ backgroundImage: `url(${currentTrack.thumbnail})` }}
       />
       <div 
@@ -391,9 +463,13 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
       />
 
       {/* Top Mobile Pull-Down Drag Bar Indicator */}
-      <div className="w-full flex justify-center pb-1 pointer-events-none">
+      <div 
+        id="mini-player-drag-handle"
+        data-drag-handle="true"
+        className="w-full flex justify-center py-2.5 -mt-1 cursor-grab active:cursor-grabbing touch-none select-none"
+      >
         <div 
-          className="w-12 h-1.5 rounded-full bg-white/30 hover:bg-white/50 active:bg-white/70 transition-all cursor-grab active:cursor-grabbing pointer-events-auto"
+          className="w-12 sm:w-14 h-1.5 rounded-full bg-white/40 hover:bg-white/60 active:bg-white/80 transition-all pointer-events-none shadow-sm"
           title="Slide down to minimize"
         />
       </div>
@@ -402,14 +478,18 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
       <header className="relative z-10 flex items-center justify-between gap-4 max-w-4xl mx-auto w-full pt-1">
         <button
           onClick={handleAnimatedClose}
-          className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+          className={`p-2.5 rounded-2xl text-neutral-300 hover:text-white transition-colors cursor-pointer ${
+            isLiquidGlass ? 'liquid-glass-btn' : 'bg-white/10 hover:bg-white/20'
+          }`}
           title="Minimize"
         >
           <ChevronDown className="w-5 h-5" />
         </button>
 
         {/* View Mode Switcher Pills */}
-        <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-900/80 border border-white/10 backdrop-blur-xl">
+        <div className={`flex items-center gap-1 p-1 rounded-2xl ${
+          isLiquidGlass ? 'liquid-glass-segment' : 'bg-neutral-900/80 border border-white/10 backdrop-blur-xl'
+        }`}>
           {[
             { id: 'artwork' as PlayerViewMode, label: 'Artwork', icon: ImageIcon },
             { id: 'visualizer' as PlayerViewMode, label: 'Visualizer', icon: AudioWaveform },
@@ -422,9 +502,11 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
               <button
                 key={mode.id}
                 onClick={() => handleSelectViewMode(mode.id)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-white/20 text-white shadow-sm'
+                    ? isLiquidGlass
+                      ? 'liquid-glass-segment-active'
+                      : 'bg-white/20 text-white shadow-sm'
                     : 'text-neutral-400 hover:text-neutral-200'
                 }`}
                 title={`Switch to ${mode.label} mode`}
@@ -440,7 +522,9 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         <div className="flex items-center gap-1 sm:gap-2">
           <button
             onClick={onOpenEqualizer}
-            className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white transition-colors"
+            className={`p-2.5 rounded-2xl text-neutral-300 hover:text-white transition-colors ${
+              isLiquidGlass ? 'liquid-glass-btn' : 'bg-white/10 hover:bg-white/20'
+            }`}
             title="AutoEq & Equalizer"
           >
             <Sliders className="w-4 h-4" />
@@ -448,10 +532,22 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
 
           <button
             onClick={onOpenSleepTimer}
-            className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white transition-colors"
+            className={`p-2.5 rounded-2xl text-neutral-300 hover:text-white transition-colors ${
+              isLiquidGlass ? 'liquid-glass-btn' : 'bg-white/10 hover:bg-white/20'
+            }`}
             title="Sleep Timer"
           >
             <Moon className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={onOpenQueue}
+            className={`p-2.5 rounded-2xl text-neutral-300 hover:text-white transition-colors ${
+              isLiquidGlass ? 'liquid-glass-btn' : 'bg-white/10 hover:bg-white/20'
+            }`}
+            title="Up Next Queue"
+          >
+            <ListMusic className="w-4 h-4" />
           </button>
         </div>
       </header>
@@ -798,8 +894,12 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
         <div className="flex items-center justify-between gap-4">
           <button
             onClick={onToggleShuffle}
-            className={`p-3 rounded-2xl transition-colors ${
-              isShuffle ? 'text-white bg-white/20' : 'text-neutral-400 hover:text-white'
+            className={`p-3 rounded-2xl transition-all active:scale-95 cursor-pointer ${
+              isShuffle 
+                ? 'text-white bg-white/20 shadow-sm border border-white/20' 
+                : isLiquidGlass 
+                  ? 'text-neutral-400 hover:text-white hover:bg-white/10' 
+                  : 'text-neutral-400 hover:text-white'
             }`}
             title="Shuffle"
           >
@@ -808,7 +908,9 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
 
           <button
             onClick={onPrevTrack}
-            className="p-3 rounded-2xl text-neutral-200 hover:text-white hover:bg-white/10 transition-colors"
+            className={`p-3 rounded-2xl text-neutral-200 hover:text-white transition-all active:scale-95 cursor-pointer ${
+              isLiquidGlass ? 'liquid-glass-btn' : 'hover:bg-white/10'
+            }`}
             title="Previous Track"
           >
             <SkipBack className="w-6 h-6" />
@@ -817,8 +919,11 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
           {/* Primary Play/Pause Button */}
           <button
             onClick={onTogglePlay}
-            className="w-16 h-16 rounded-3xl flex items-center justify-center text-black shadow-2xl transition-transform active:scale-95 hover:brightness-110"
-            style={{ backgroundColor: seedColor }}
+            className="w-16 h-16 rounded-3xl flex items-center justify-center text-black shadow-2xl transition-transform active:scale-95 hover:brightness-110 cursor-pointer"
+            style={{ 
+              backgroundColor: seedColor,
+              boxShadow: `0 14px 36px -4px ${seedColor}70, inset 0 1px 1px 0 rgba(255, 255, 255, 0.45)`
+            }}
             title={isPlaying ? 'Pause' : 'Play'}
           >
             {isBuffering ? (
@@ -832,7 +937,9 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
 
           <button
             onClick={onNextTrack}
-            className="p-3 rounded-2xl text-neutral-200 hover:text-white hover:bg-white/10 transition-colors"
+            className={`p-3 rounded-2xl text-neutral-200 hover:text-white transition-all active:scale-95 cursor-pointer ${
+              isLiquidGlass ? 'liquid-glass-btn' : 'hover:bg-white/10'
+            }`}
             title="Next Track"
           >
             <SkipForward className="w-6 h-6" />
@@ -840,8 +947,12 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
 
           <button
             onClick={onToggleRepeat}
-            className={`p-3 rounded-2xl transition-colors ${
-              repeatMode !== 'off' ? 'text-white bg-white/20' : 'text-neutral-400 hover:text-white'
+            className={`p-3 rounded-2xl transition-all active:scale-95 cursor-pointer ${
+              repeatMode !== 'off' 
+                ? 'text-white bg-white/20 shadow-sm border border-white/20' 
+                : isLiquidGlass 
+                  ? 'text-neutral-400 hover:text-white hover:bg-white/10' 
+                  : 'text-neutral-400 hover:text-white'
             }`}
             title="Repeat"
           >

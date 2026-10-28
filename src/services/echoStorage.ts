@@ -26,7 +26,7 @@ export interface LastPlaybackState {
 
 export const DEFAULT_ECHO_SETTINGS: EchoSettings = {
   audioQuality: 'high-256',
-  theme: 'echo-coral',
+  theme: 'liquid-glass',
   seedColor: '#FF5252',
   sponsorBlockEnabled: true,
   sponsorBlockCategories: ['sponsor', 'selfpromo', 'interaction', 'intro', 'music_offtopic'],
