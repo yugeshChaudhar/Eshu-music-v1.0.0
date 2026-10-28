@@ -122,16 +122,7 @@ export interface PodcastShow {
   episodes: PodcastEpisode[];
 }
 
-// AutoEq & Equalizer
-export interface AutoEqProfile {
-  id: string;
-  name: string;
-  brand: string;
-  type: 'In-Ear' | 'Over-Ear' | 'Earbuds';
-  targetCurve: string;
-  gains: number[]; // 10 band gains
-}
-
+// Equalizer
 export type EqualizerPreset = 
   | 'flat' 
   | 'bass-boost' 
@@ -288,7 +279,6 @@ export interface EchoSettings {
   equalizerPreset: EqualizerPreset;
   equalizerBands: EqualizerBands;
   tenBandEq: TenBandEqualizer;
-  autoEqProfileId: string | null;
   showDislikes: boolean;
   streamDataSaver: boolean;
   selectedCountryChart: string;

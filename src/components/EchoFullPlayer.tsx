@@ -525,7 +525,7 @@ export const EchoFullPlayer: React.FC<EchoFullPlayerProps> = ({
             className={`p-2.5 rounded-2xl text-neutral-300 hover:text-white transition-colors ${
               isLiquidGlass ? 'liquid-glass-btn' : 'bg-white/10 hover:bg-white/20'
             }`}
-            title="AutoEq & Equalizer"
+            title="Equalizer"
           >
             <Sliders className="w-4 h-4" />
           </button>

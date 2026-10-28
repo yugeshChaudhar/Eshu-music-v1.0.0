@@ -1,15 +1,80 @@
+# Dependencies
 node_modules/
-build/
-dist/
-coverage/
-.DS_Store
-*.log
-.env*
-!.env.example
+.pnp
+.pnp.js
 
-# Android build outputs
+# Build and Production Outputs
+dist/
+build/
+coverage/
+.cache/
+.turbo/
+
+# Environment Variables & API Key Files (Strictly Ignored)
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*
+*.env
+*.env.local
+
+# Allow safe environment template/example files only (no secrets)
+!.env.example
+!.env.template
+
+# API Keys, Credentials & Secret JSON Files
+firebase-applet-config*.json
+*firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
+secrets.json
+credentials.json
+client_secret*.json
+client_secrets*.json
+serviceAccountKey*.json
+service-account*.json
+api-keys*.json
+api_keys*.json
+*.secret
+*.token
+
+# SSL / TLS Certificates, Private Keys & Keystores
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.keystore
+*.jks
+
+# Package Manager Auth & Token Caches
+.npmrc
+.yarnrc
+
+# Android Build Outputs & Local Configs
 android/.gradle/
 android/build/
 android/app/build/
-*.keystore
-*.jks
+local.properties
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS & Editor Metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json

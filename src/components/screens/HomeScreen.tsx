@@ -183,7 +183,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <p className="text-neutral-400 text-xs sm:text-sm leading-relaxed">
               {currentTrack 
                 ? `Currently tuning to "${currentTrack.title}" by ${currentTrack.artist}. Continuous background play is enabled.`
-                : 'Stream millions of tracks ad-free with dynamic AutoEq acoustic tuning, synced lyrics, and continuous background play.'}
+                : 'Stream millions of tracks ad-free with studio 10-band equalizer presets, synced lyrics, and continuous background play.'}
             </p>
           </div>
 

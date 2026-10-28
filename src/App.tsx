@@ -7,7 +7,6 @@ import {
   TabType, 
   EchoSettings, 
   LyricsData, 
-  AutoEqProfile, 
   TenBandEqualizer, 
   EqualizerPreset, 
   UserStats, 
@@ -18,7 +17,6 @@ import {
   ECHO_QUICK_PICKS, 
   ECHO_MOODS_AND_GENRES, 
   ECHO_TOP_ARTISTS, 
-  AUTO_EQ_PROFILES, 
   EQUALIZER_PRESETS_10_BAND 
 } from './data/echoMusicData';
 import { 
@@ -1364,7 +1362,6 @@ export function App() {
                 <EqualizerScreen
                   currentPreset={settings.equalizerPreset}
                   tenBandEq={settings.tenBandEq}
-                  selectedAutoEqId={settings.autoEqProfileId}
                   onUpdatePreset={(preset) => {
                     const updated = { ...settings, equalizerPreset: preset, tenBandEq: EQUALIZER_PRESETS_10_BAND[preset] };
                     setSettings(updated);
@@ -1372,11 +1369,6 @@ export function App() {
                   }}
                   onUpdateTenBandEq={(eq) => {
                     const updated = { ...settings, tenBandEq: eq };
-                    setSettings(updated);
-                    saveSettings(updated);
-                  }}
-                  onSelectAutoEqProfile={(prof) => {
-                    const updated = { ...settings, autoEqProfileId: prof ? prof.id : null };
                     setSettings(updated);
                     saveSettings(updated);
                   }}

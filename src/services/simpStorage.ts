@@ -43,7 +43,6 @@ export const DEFAULT_SETTINGS: SimpSettings = {
     b8k: 0,
     b16k: 0,
   },
-  autoEqProfileId: null,
   showDislikes: true,
   streamDataSaver: false,
   selectedCountryChart: 'GLOBAL',

@@ -15,6 +15,8 @@ const SETTINGS_KEY = 'echo_music_settings_v2';
 const HISTORY_KEY = 'echo_music_history_v2';
 const ARTISTS_KEY = 'echo_music_followed_artists_v2';
 const LAST_PLAYBACK_KEY = 'echo_music_last_playback_v2';
+const RECENT_SEARCHES_KEY = 'echo_music_recent_searches_v2';
+const MAX_RECENT_SEARCHES = 20;
 
 export interface LastPlaybackState {
   track: Track;
@@ -46,7 +48,6 @@ export const DEFAULT_ECHO_SETTINGS: EchoSettings = {
     treble: 0,
   },
   tenBandEq: EQUALIZER_PRESETS_10_BAND.flat,
-  autoEqProfileId: null,
   showDislikes: true,
   streamDataSaver: false,
   selectedCountryChart: 'GLOBAL',
@@ -414,6 +415,7 @@ export function exportEchoBackup(): string {
     followedArtists: getFollowedArtists(),
     settings: getSavedSettings(),
     stats: getUserStats(),
+    recentSearches: getRecentSearches(),
   };
   return safeJsonStringify(backup, '{}');
 }
@@ -438,6 +440,14 @@ export function importEchoBackup(jsonString: string): { success: boolean; messag
     if (Array.isArray(parsed.followedArtists)) {
       const cleanArtists = parsed.followedArtists.filter((a: any) => typeof a === 'string');
       localStorage.setItem(ARTISTS_KEY, safeJsonStringify(cleanArtists, '[]'));
+    }
+
+    if (Array.isArray(parsed.recentSearches)) {
+      const cleanSearches = parsed.recentSearches
+        .filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+        .map((s: string) => s.trim())
+        .slice(0, MAX_RECENT_SEARCHES);
+      localStorage.setItem(RECENT_SEARCHES_KEY, safeJsonStringify(cleanSearches, '[]'));
     }
 
     if (parsed.settings && typeof parsed.settings === 'object') {
@@ -504,4 +514,63 @@ export function getLastPlaybackState(): LastPlaybackState | null {
     return null;
   }
 }
+
+// 8. Recent Search History
+export function getRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY) || localStorage.getItem('simpmusic_recent_searches_v1');
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((item: any) => typeof item === 'string' && item.trim().length > 0)
+      .map((item: string) => item.trim());
+  } catch (err) {
+    console.warn('Failed to retrieve recent searches:', err);
+    return [];
+  }
+}
+
+export function addRecentSearch(query: string): string[] {
+  if (typeof query !== 'string') return getRecentSearches();
+  const trimmed = query.trim();
+  if (!trimmed) return getRecentSearches();
+
+  try {
+    const current = getRecentSearches();
+    // Case-insensitive deduplication: remove any existing instance
+    const filtered = current.filter((item) => item.toLowerCase() !== trimmed.toLowerCase());
+    // Place trimmed query at the top (most recent) and limit length
+    const updated = [trimmed, ...filtered].slice(0, MAX_RECENT_SEARCHES);
+    localStorage.setItem(RECENT_SEARCHES_KEY, safeJsonStringify(updated, '[]'));
+    return updated;
+  } catch (err) {
+    console.warn('Failed to save recent search query:', err);
+    return [trimmed];
+  }
+}
+
+export function removeRecentSearch(queryToRemove: string): string[] {
+  if (typeof queryToRemove !== 'string') return getRecentSearches();
+  const target = queryToRemove.trim().toLowerCase();
+  try {
+    const current = getRecentSearches();
+    const updated = current.filter((item) => item.toLowerCase() !== target);
+    localStorage.setItem(RECENT_SEARCHES_KEY, safeJsonStringify(updated, '[]'));
+    return updated;
+  } catch (err) {
+    console.warn('Failed to remove recent search:', err);
+    return [];
+  }
+}
+
+export function clearRecentSearches(): void {
+  try {
+    localStorage.removeItem(RECENT_SEARCHES_KEY);
+    localStorage.removeItem('simpmusic_recent_searches_v1');
+  } catch (err) {
+    console.warn('Failed to clear recent searches:', err);
+  }
+}
+
 

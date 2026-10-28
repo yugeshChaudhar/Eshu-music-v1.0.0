@@ -83,7 +83,7 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
         <div className="p-5 rounded-3xl bg-neutral-900/70 border border-white/10 shadow-xl space-y-1">
           <div className="flex items-center gap-2 text-neutral-400 text-xs font-bold uppercase">
             <Zap className="w-4 h-4 text-amber-400" />
-            <span>AutoEq Active</span>
+            <span>Equalizer DSP</span>
           </div>
           <p className="text-2xl sm:text-3xl font-extrabold text-white">
             100% <span className="text-sm font-normal text-neutral-400">DSP</span>
@@ -140,7 +140,7 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
 
             <div>
               <div className="flex justify-between text-xs font-bold text-neutral-300 mb-1.5">
-                <span>AutoEq & Harman DSP Processed</span>
+                <span>10-Band Graphic DSP Processed</span>
                 <span style={{ color: seedColor }}>100%</span>
               </div>
               <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">

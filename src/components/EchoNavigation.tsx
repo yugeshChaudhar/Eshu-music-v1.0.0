@@ -45,7 +45,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
     { id: 'home' as TabType, label: 'Home', icon: Home },
     { id: 'podcasts' as TabType, label: 'Podcasts', icon: Radio },
     { id: 'library' as TabType, label: 'Library', icon: Library },
-    { id: 'equalizer' as TabType, label: 'AutoEq', icon: Sliders },
+    { id: 'equalizer' as TabType, label: 'Equalizer', icon: Sliders },
     { id: 'analytics' as TabType, label: 'Analytics', icon: BarChart3 },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
   ];
@@ -56,7 +56,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
     { id: 'search' as TabType, label: 'Search', icon: Search },
     { id: 'library' as TabType, label: 'Library', icon: Library },
     { id: 'podcasts' as TabType, label: 'Podcasts', icon: Radio },
-    { id: 'equalizer' as TabType, label: 'AutoEq', icon: Sliders },
+    { id: 'equalizer' as TabType, label: 'Equalizer', icon: Sliders },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
   ];
 
@@ -177,7 +177,7 @@ export const EchoNavigation: React.FC<EchoNavigationProps> = ({
             <span>Eshu Audio Engine</span>
           </div>
           <p className="text-[10px] leading-relaxed text-neutral-400">
-            SponsorBlock auto-skip & AutoEq active.
+            SponsorBlock auto-skip & DSP Equalizer active.
           </p>
         </div>
       </aside>

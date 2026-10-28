@@ -1,42 +1,33 @@
 import React, { useState } from 'react';
 import { 
   Sliders, 
-  Headphones, 
   Sparkles, 
   Volume2, 
   RotateCcw, 
-  Check, 
   Layers, 
-  Zap, 
-  ShieldCheck
+  Zap 
 } from 'lucide-react';
 import { 
   EqualizerPreset, 
-  TenBandEqualizer, 
-  AutoEqProfile 
+  TenBandEqualizer 
 } from '../../types';
 import { 
-  AUTO_EQ_PROFILES, 
   EQUALIZER_PRESETS_10_BAND 
 } from '../../data/echoMusicData';
 
 interface EqualizerScreenProps {
   currentPreset: EqualizerPreset;
   tenBandEq: TenBandEqualizer;
-  selectedAutoEqId: string | null;
   onUpdatePreset: (preset: EqualizerPreset) => void;
   onUpdateTenBandEq: (eq: TenBandEqualizer) => void;
-  onSelectAutoEqProfile: (profile: AutoEqProfile | null) => void;
   seedColor?: string;
 }
 
 export const EqualizerScreen: React.FC<EqualizerScreenProps> = ({
   currentPreset,
   tenBandEq,
-  selectedAutoEqId,
   onUpdatePreset,
   onUpdateTenBandEq,
-  onSelectAutoEqProfile,
   seedColor = '#FF5252',
 }) => {
   const [bassBoostAmount, setBassBoostAmount] = useState<number>(35);
@@ -78,10 +69,7 @@ export const EqualizerScreen: React.FC<EqualizerScreenProps> = ({
   const handleResetFlat = () => {
     onUpdatePreset('flat');
     onUpdateTenBandEq(EQUALIZER_PRESETS_10_BAND.flat);
-    onSelectAutoEqProfile(null);
   };
-
-  const selectedProfile = AUTO_EQ_PROFILES.find((p) => p.id === selectedAutoEqId);
 
   return (
     <div className="space-y-8 pb-32 animate-fadeIn max-w-5xl mx-auto">
@@ -100,10 +88,10 @@ export const EqualizerScreen: React.FC<EqualizerScreenProps> = ({
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mb-2">
-              AutoEq & Equalizer
+              Equalizer
             </h1>
             <p className="text-neutral-400 text-xs sm:text-sm leading-relaxed max-w-xl">
-              Calibrate frequency response curves with AutoEq headphone profiles or sculpt your sound with our 10-band studio parametric equalizer.
+              Sculpt your sound with our 10-band studio parametric equalizer and audio presets.
             </p>
           </div>
 
@@ -117,80 +105,6 @@ export const EqualizerScreen: React.FC<EqualizerScreenProps> = ({
         </div>
       </div>
 
-      {/* AutoEq Headphone Profile Section */}
-      <section className="p-6 rounded-3xl bg-neutral-900/70 border border-white/10 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-white/10 flex items-center justify-center">
-              <Headphones className="w-4 h-4 text-white" style={{ color: seedColor }} />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-bold text-white">
-                AutoEq Headphone Calibration
-              </h2>
-              <p className="text-xs text-neutral-400">
-                Harman Target compensation calibrated by Jaakko Pasanen AutoEq database
-              </p>
-            </div>
-          </div>
-
-          {selectedProfile && (
-            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{selectedProfile.brand} Profile Active</span>
-            </span>
-          )}
-        </div>
-
-        {/* Profile Chips */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-          {AUTO_EQ_PROFILES.map((prof) => {
-            const isSelected = selectedAutoEqId === prof.id;
-            return (
-              <button
-                key={prof.id}
-                onClick={() => {
-                  if (isSelected) {
-                    onSelectAutoEqProfile(null);
-                  } else {
-                    onSelectAutoEqProfile(prof);
-                    // Apply profile gains to 10 bands
-                    onUpdateTenBandEq({
-                      b31: prof.gains[0] || 0,
-                      b62: prof.gains[1] || 0,
-                      b125: prof.gains[2] || 0,
-                      b250: prof.gains[3] || 0,
-                      b500: prof.gains[4] || 0,
-                      b1k: prof.gains[5] || 0,
-                      b2k: prof.gains[6] || 0,
-                      b4k: prof.gains[7] || 0,
-                      b8k: prof.gains[8] || 0,
-                      b16k: prof.gains[9] || 0,
-                    });
-                  }
-                }}
-                className={`p-3.5 rounded-2xl border text-left transition-all ${
-                  isSelected
-                    ? 'bg-neutral-800 border-white/40 ring-1 ring-white/30'
-                    : 'bg-neutral-950/60 border-white/10 hover:bg-neutral-800/80 hover:border-white/20'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-white truncate">
-                    {prof.brand} {prof.name}
-                  </span>
-                  {isSelected && <Check className="w-4 h-4" style={{ color: seedColor }} />}
-                </div>
-                <div className="flex items-center gap-2 text-[10px] text-neutral-400">
-                  <span className="px-1.5 py-0.5 rounded bg-white/10 font-semibold">{prof.type}</span>
-                  <span>{prof.targetCurve}</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
       {/* Presets Horizontal Row */}
       <section className="space-y-3">
         <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-wider">
@@ -198,12 +112,11 @@ export const EqualizerScreen: React.FC<EqualizerScreenProps> = ({
         </h2>
         <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
           {presetsList.map((preset) => {
-            const isSelected = currentPreset === preset && !selectedAutoEqId;
+            const isSelected = currentPreset === preset;
             return (
               <button
                 key={preset}
                 onClick={() => {
-                  onSelectAutoEqProfile(null);
                   onUpdatePreset(preset);
                   onUpdateTenBandEq(EQUALIZER_PRESETS_10_BAND[preset]);
                 }}

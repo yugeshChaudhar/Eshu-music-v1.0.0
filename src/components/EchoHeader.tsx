@@ -110,7 +110,7 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
 
         {/* Right: Quick Tools & Status */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Equalizer & AutoEq Shortcut */}
+          {/* Equalizer Shortcut */}
           <button
             onClick={onOpenEqualizer}
             className={`btn-icon ${isLiquidGlass ? 'liquid-glass-btn' : ''} ${
@@ -118,8 +118,8 @@ export const EchoHeader: React.FC<EchoHeaderProps> = ({
                 ? '!bg-white/20 text-white !border-white/30 shadow-lg'
                 : ''
             }`}
-            title="AutoEq & Equalizer"
-            aria-label="AutoEq and Equalizer"
+            title="Equalizer"
+            aria-label="Equalizer"
           >
             <Sliders className="w-4 h-4" />
           </button>

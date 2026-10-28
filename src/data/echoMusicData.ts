@@ -5,7 +5,6 @@ import {
   MoodCategory, 
   PodcastShow, 
   PodcastEpisode, 
-  AutoEqProfile, 
   TenBandEqualizer, 
   EqualizerPreset 
 } from '../types';
@@ -873,59 +872,7 @@ export const ECHO_PODCASTS: PodcastShow[] = [
   }
 ];
 
-// 7. AutoEq Headphone Calibration Profiles
-export const AUTO_EQ_PROFILES: AutoEqProfile[] = [
-  {
-    id: 'sony-wh1000xm4',
-    name: 'WH-1000XM4 (Harman OE 2018)',
-    brand: 'Sony',
-    type: 'Over-Ear',
-    targetCurve: 'Harman Over-Ear Target 2018',
-    gains: [-2.5, -1.8, 0.5, 1.2, 0.8, -0.4, 1.6, 2.4, 1.1, -0.5],
-  },
-  {
-    id: 'apple-airpods-pro-2',
-    name: 'AirPods Pro (2nd Gen)',
-    brand: 'Apple',
-    type: 'In-Ear',
-    targetCurve: 'Harman In-Ear Target',
-    gains: [0.8, 0.4, -0.2, 0.0, -0.6, 0.8, 1.4, 0.5, -1.2, 0.2],
-  },
-  {
-    id: 'sennheiser-hd600',
-    name: 'HD 600 Audiophile Reference',
-    brand: 'Sennheiser',
-    type: 'Over-Ear',
-    targetCurve: 'Diffuse Field / Harman Hybrid',
-    gains: [3.5, 2.8, 1.2, 0.0, -0.2, -0.5, 0.4, 1.0, 0.8, 0.0],
-  },
-  {
-    id: 'samsung-buds2-pro',
-    name: 'Galaxy Buds 2 Pro',
-    brand: 'Samsung',
-    type: 'Earbuds',
-    targetCurve: 'Harman IE Target',
-    gains: [-1.0, -0.5, 0.2, 0.4, 0.0, 0.5, -0.8, 1.2, 0.4, -0.2],
-  },
-  {
-    id: 'audio-technica-m50x',
-    name: 'ATH-M50x Studio Monitor',
-    brand: 'Audio-Technica',
-    type: 'Over-Ear',
-    targetCurve: 'Harman Studio Flat',
-    gains: [-3.2, -2.4, -0.8, 0.6, 1.4, 0.8, -1.5, 0.6, 2.0, 1.2],
-  },
-  {
-    id: 'bose-qc45',
-    name: 'QuietComfort 45',
-    brand: 'Bose',
-    type: 'Over-Ear',
-    targetCurve: 'Harman OE Target',
-    gains: [-1.8, -0.8, 0.6, 1.0, 0.2, -1.2, 0.8, 2.0, 1.4, -0.6],
-  },
-];
-
-// 8. 10-Band Equalizer Presets
+// 7. 10-Band Equalizer Presets
 export const EQUALIZER_PRESETS_10_BAND: Record<EqualizerPreset, TenBandEqualizer> = {
   flat: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0 },
   'bass-boost': { b31: 6, b62: 5, b125: 4, b250: 2, b500: 0, b1k: 0, b2k: 0, b4k: 1, b8k: 2, b16k: 2 },
