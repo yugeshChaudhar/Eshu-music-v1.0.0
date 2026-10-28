@@ -26,7 +26,12 @@ export function isNativeAndroid(): boolean {
  * Get configured remote API Base URL (if provided via VITE_API_BASE_URL).
  */
 export function getApiBaseUrl(): string {
-  const envUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  let envUrl = '';
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.env && typeof import.meta.env.VITE_API_BASE_URL === 'string') {
+      envUrl = import.meta.env.VITE_API_BASE_URL.trim();
+    }
+  } catch {}
   if (envUrl) {
     const clean = envUrl.replace(/\/+$/, '');
     if (!hasLoggedBaseUrl) {

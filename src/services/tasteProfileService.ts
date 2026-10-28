@@ -74,8 +74,9 @@ function getCleanArtistKey(artist: string): string {
 
 export function getStoredTasteProfile(): TasteProfile {
   try {
-    const raw = localStorage.getItem(TASTE_PROFILE_KEY);
-    if (raw) {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(TASTE_PROFILE_KEY);
+      if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         return {
@@ -90,7 +91,8 @@ export function getStoredTasteProfile(): TasteProfile {
         };
       }
     }
-  } catch (err) {
+  }
+} catch (err) {
     console.warn('[TasteProfile] Error loading profile:', err);
   }
 

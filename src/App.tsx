@@ -53,6 +53,12 @@ import {
   triggerAdaptiveRecommendationUpdate,
 } from './services/tasteProfileService';
 import { invalidateRecommendationCache } from './services/recommendationService';
+import { 
+  generateSmartAutoplayQueue, 
+  expandSmartAutoplayQueue, 
+  detectTrackMusicProfile, 
+  MusicProfile 
+} from './services/smartAutoplayQueueService';
 import { fetchLyricsForTrack } from './services/lyricsService';
 import { getAutoActiveLyricIndex } from './services/lyricSyncService';
 import { resolveRealVideoId } from './services/universalSearchService';
@@ -144,6 +150,18 @@ export function App() {
   const [queueIndex, setQueueIndex] = useState<number>(() => {
     return typeof initialPlayback?.queueIndex === 'number' ? initialPlayback.queueIndex : 0;
   });
+
+  // Smart Genre-Aware Autoplay Queue State
+  const [currentMusicProfile, setCurrentMusicProfile] = useState<MusicProfile | null>(null);
+  const [isGeneratingQueue, setIsGeneratingQueue] = useState<boolean>(false);
+  const [queueSource, setQueueSource] = useState<'smart_autoplay' | 'intentional_playlist' | 'manual'>('smart_autoplay');
+  const queueSourceRef = useRef<'smart_autoplay' | 'intentional_playlist' | 'manual'>(queueSource);
+  const isExpandingQueueRef = useRef(false);
+  const generatingSeedIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    queueSourceRef.current = queueSource;
+  }, [queueSource]);
 
   // Storage & Collections State
   const [favorites, setFavorites] = useState<Track[]>(() => getFavoriteTracks());
@@ -663,7 +681,11 @@ export function App() {
   }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.duration]);
 
   // 5. Playback Handlers
-  const handlePlayTrack = async (trackInput: any, newQueue?: Track[]) => {
+  const handlePlayTrack = async (
+    trackInput: any, 
+    newQueue?: Track[], 
+    origin: 'intentional' | 'autoplay' | 'single' = newQueue && newQueue.length > 1 ? 'intentional' : 'single'
+  ) => {
     if (!trackInput || isDomOrEvent(trackInput)) return;
     const track = sanitizeTrack(trackInput);
 
@@ -706,7 +728,10 @@ export function App() {
     setHistoryList(getListeningHistory());
     setUserStats(getUserStats());
 
-    if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
+    const isExplicitIntentionalQueue = origin === 'intentional' && newQueue && Array.isArray(newQueue) && newQueue.length > 1;
+
+    if (isExplicitIntentionalQueue) {
+      // User explicitly requested playback of a complete playlist or collection
       const cleanQueue = newQueue.filter((t) => t && !isDomOrEvent(t)).map(sanitizeTrack);
       setPlayQueue(cleanQueue);
       playQueueRef.current = cleanQueue;
@@ -714,12 +739,57 @@ export function App() {
       const targetIdx = idx >= 0 ? idx : 0;
       setQueueIndex(targetIdx);
       queueIndexRef.current = targetIdx;
+      setQueueSource('intentional_playlist');
+      queueSourceRef.current = 'intentional_playlist';
     } else {
       const currentQ = playQueueRef.current;
-      const idx = currentQ.findIndex((t) => t.id === track.id);
-      if (idx >= 0) {
-        setQueueIndex(idx);
-        queueIndexRef.current = idx;
+      const existingIdx = currentQ.findIndex((t) => t.id === track.id);
+
+      if (origin === 'autoplay' && existingIdx >= 0 && currentQ.length > 1) {
+        // Advancing naturally within existing queue or user tapped an already queued song
+        setQueueIndex(existingIdx);
+        queueIndexRef.current = existingIdx;
+      } else {
+        // User selected an individual track (from Search, Home, Library, or direct tap):
+        // 1. Seed track starts playing immediately without delay
+        // 2. Set initial queue = [track] and asynchronously generate the Smart Genre-Aware Autoplay Queue
+        const initialQueue = [track];
+        setPlayQueue(initialQueue);
+        playQueueRef.current = initialQueue;
+        setQueueIndex(0);
+        queueIndexRef.current = 0;
+        setQueueSource('smart_autoplay');
+        queueSourceRef.current = 'smart_autoplay';
+
+        const immediateProfile = detectTrackMusicProfile(track);
+        setCurrentMusicProfile(immediateProfile);
+
+        const seedId = track.id;
+        generatingSeedIdRef.current = seedId;
+        setIsGeneratingQueue(true);
+
+        generateSmartAutoplayQueue(track, {
+          customPlaylists,
+          favorites,
+        })
+          .then(({ queue: relatedTracks, profile }) => {
+            // Verify that the user has not switched to another track during generation
+            if (generatingSeedIdRef.current === seedId && currentTrackRef.current?.id === seedId) {
+              setCurrentMusicProfile(profile);
+              setIsGeneratingQueue(false);
+              if (relatedTracks.length > 0) {
+                const updatedQueue = [track, ...relatedTracks];
+                setPlayQueue(updatedQueue);
+                playQueueRef.current = updatedQueue;
+                setQueueIndex(0);
+                queueIndexRef.current = 0;
+              }
+            }
+          })
+          .catch((err) => {
+            console.warn('[SmartAutoplay] Queue generation error:', err);
+            setIsGeneratingQueue(false);
+          });
       }
     }
 
@@ -848,7 +918,33 @@ export function App() {
     setQueueIndex(nextIdx);
     const nextSong = queue[nextIdx];
     if (nextSong) {
-      handlePlayTrack(nextSong);
+      handlePlayTrack(nextSong, undefined, 'autoplay');
+    }
+
+    // Continuous Autoplay Expansion:
+    // If approaching the end of the current queue (<= 3 upcoming tracks left), fetch more related tracks in background
+    if (
+      queue.length - nextIdx <= 4 &&
+      !isExpandingQueueRef.current &&
+      activeTrack
+    ) {
+      isExpandingQueueRef.current = true;
+      expandSmartAutoplayQueue(activeTrack, queue, { customPlaylists, favorites })
+        .then((newAdditions) => {
+          isExpandingQueueRef.current = false;
+          if (newAdditions && newAdditions.length > 0) {
+            setPlayQueue((prev) => {
+              const prevIds = new Set(prev.map((p) => p.id));
+              const fresh = newAdditions.filter((n) => !prevIds.has(n.id));
+              const expanded = [...prev, ...fresh];
+              playQueueRef.current = expanded;
+              return expanded;
+            });
+          }
+        })
+        .catch(() => {
+          isExpandingQueueRef.current = false;
+        });
     }
   };
 
@@ -860,7 +956,7 @@ export function App() {
     setQueueIndex(prevIdx);
     const prevSong = queue[prevIdx];
     if (prevSong) {
-      handlePlayTrack(prevSong);
+      handlePlayTrack(prevSong, undefined, 'autoplay');
     }
   };
 
@@ -1158,16 +1254,16 @@ export function App() {
               currentPlayingTrackId={currentTrack?.id}
               seedColor={settings.seedColor}
               onBack={() => setSelectedPlaylistView(null)}
-              onPlayTrack={(track, fromList) => handlePlayTrack(track, fromList)}
+              onPlayTrack={(track, fromList) => handlePlayTrack(track, fromList, 'intentional')}
               onPlayAll={() => {
                 if (selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0) {
-                  handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks);
+                  handlePlayTrack(selectedPlaylistView.tracks[0], selectedPlaylistView.tracks, 'intentional');
                 }
               }}
               onShuffleAll={() => {
                 if (selectedPlaylistView.tracks && selectedPlaylistView.tracks.length > 0) {
                   const shuffled = [...selectedPlaylistView.tracks].sort(() => Math.random() - 0.5);
-                  handlePlayTrack(shuffled[0], shuffled);
+                  handlePlayTrack(shuffled[0], shuffled, 'intentional');
                 }
               }}
               onRemoveTrackFromPlaylist={(trackId, trackIndex) => {
@@ -1242,7 +1338,7 @@ export function App() {
                 {selectedArtistView.topTracks.map((track, idx) => (
                   <div
                     key={track.id}
-                    onClick={() => handlePlayTrack(track, selectedArtistView.topTracks)}
+                    onClick={() => handlePlayTrack(track, selectedArtistView.topTracks, 'intentional')}
                     className="p-3 rounded-2xl bg-neutral-900/60 hover:bg-neutral-900 border border-white/10 transition-all flex items-center justify-between gap-3 cursor-pointer group"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1268,11 +1364,11 @@ export function App() {
             <MoodDetailScreen
               mood={selectedMoodView}
               onBack={() => setSelectedMoodView(null)}
-              onPlayTrack={(track, queue) => handlePlayTrack(track, queue)}
-              onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks)}
+              onPlayTrack={(track, queue) => handlePlayTrack(track, queue, queue && queue.length > 1 ? 'intentional' : 'single')}
+              onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks, 'intentional')}
               onShuffleAll={(tracks) => {
                 const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-                handlePlayTrack(shuffled[0], shuffled);
+                handlePlayTrack(shuffled[0], shuffled, 'intentional');
               }}
               favoriteTrackIds={favoriteSet}
               onToggleFavorite={handleToggleFavorite}
@@ -1291,10 +1387,10 @@ export function App() {
                   currentTrack={currentTrack}
                   isPlaying={isPlaying}
                   onPlayTrack={handlePlayTrack}
-                  onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks)}
+                  onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks, 'intentional')}
                   onShuffleAll={(tracks) => {
                     const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-                    handlePlayTrack(shuffled[0], shuffled);
+                    handlePlayTrack(shuffled[0], shuffled, 'intentional');
                   }}
                   onSelectPlaylist={(pl) => setSelectedPlaylistView(pl)}
                   onSelectArtist={(art) => setSelectedArtistView(art)}
@@ -1342,10 +1438,10 @@ export function App() {
                   customPlaylists={customPlaylists}
                   followedArtists={followedArtists}
                   onPlayTrack={handlePlayTrack}
-                  onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks)}
+                  onPlayAll={(tracks) => handlePlayTrack(tracks[0], tracks, 'intentional')}
                   onShuffleAll={(tracks) => {
                     const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-                    handlePlayTrack(shuffled[0], shuffled);
+                    handlePlayTrack(shuffled[0], shuffled, 'intentional');
                   }}
                   onSelectPlaylist={(pl) => setSelectedPlaylistView(pl)}
                   onCreatePlaylist={() => setIsCreatePlaylistOpen(true)}
@@ -1565,9 +1661,38 @@ export function App() {
           } rounded-3xl p-6 shadow-2xl flex flex-col justify-between`}>
             <div>
               <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <ListMusic className="w-5 h-5 text-[#FF5252]" style={{ color: settings.seedColor }} />
-                  <h3 className="font-bold text-base text-white">Up Next Queue ({playQueue.length})</h3>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div 
+                    className="w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: `${settings.seedColor}20` }}
+                  >
+                    <ListMusic className="w-5 h-5" style={{ color: settings.seedColor }} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-base text-white truncate">Up Next Queue ({playQueue.length})</h3>
+                    {queueSource === 'smart_autoplay' && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-neutral-300 font-medium">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                        <span className="capitalize truncate">
+                          Smart Autoplay • {currentMusicProfile?.genre || 'Adaptive'}
+                          {currentMusicProfile?.language && currentMusicProfile.language !== 'unknown' && currentMusicProfile.language !== 'english' && currentMusicProfile.language !== 'instrumental'
+                            ? ` (${currentMusicProfile.language})`
+                            : ''}
+                        </span>
+                        {isGeneratingQueue && (
+                          <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-normal flex-shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Discovering...</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {queueSource === 'intentional_playlist' && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-medium">
+                        <span>Playlist Collection</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {playQueue.length > 1 && (
@@ -1586,7 +1711,7 @@ export function App() {
                       title="Randomize upcoming queue"
                     >
                       <Shuffle className="w-3.5 h-3.5" />
-                      <span>Randomize</span>
+                      <span className="hidden sm:inline">Randomize</span>
                     </button>
                   )}
                   <button onClick={() => setIsQueueOpen(false)} className="p-1 text-neutral-400 hover:text-white">
@@ -1595,22 +1720,22 @@ export function App() {
                 </div>
               </div>
 
-              <div className="overflow-y-auto max-h-[60vh] space-y-2 pr-1 custom-scrollbar">
+              <div className="overflow-y-auto max-h-[58vh] space-y-2 pr-1 custom-scrollbar">
                 {playQueue.map((track, idx) => {
                   const isCurrent = currentTrack?.id === track.id;
                   return (
                     <div
                       key={`${track.id}-${idx}`}
-                      onClick={() => handlePlayTrack(track)}
-                      className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                      onClick={() => handlePlayTrack(track, undefined, 'autoplay')}
+                      className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer group ${
                         isCurrent 
                           ? 'bg-neutral-800 border-white/30 text-white' 
-                          : 'bg-neutral-950/60 border-white/5 text-neutral-300 hover:bg-neutral-800'
+                          : 'bg-neutral-950/60 border-white/5 text-neutral-300 hover:bg-neutral-800/80 hover:border-white/15'
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="w-4 text-center text-xs font-bold text-neutral-400">{idx + 1}</span>
-                        <img src={track.thumbnail} alt={track.title} className="w-10 h-10 rounded-xl object-cover" />
+                        <img src={track.thumbnail} alt={track.title} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
                         <div className="min-w-0 flex-1">
                           <h4 className={`text-xs font-bold truncate ${isCurrent ? 'text-[#FF5252]' : ''}`}>
                             {track.title}
@@ -1618,9 +1743,45 @@ export function App() {
                           <p className="text-[10px] text-neutral-400 truncate">{track.artist}</p>
                         </div>
                       </div>
+
+                      {isCurrent ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                          Playing
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPlayQueue((prev) => {
+                              const updated = prev.filter((_, i) => i !== idx);
+                              playQueueRef.current = updated;
+                              if (queueIndexRef.current > idx) {
+                                setQueueIndex((curr) => Math.max(0, curr - 1));
+                                queueIndexRef.current = Math.max(0, queueIndexRef.current - 1);
+                              }
+                              return updated;
+                            });
+                          }}
+                          className="p-1.5 rounded-lg text-neutral-500 hover:text-red-400 hover:bg-white/10 transition-colors opacity-70 hover:opacity-100"
+                          title="Remove from queue"
+                          aria-label={`Remove ${track.title} from queue`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
+
+                {isGeneratingQueue && playQueue.length <= 1 && (
+                  <div className="p-3 rounded-2xl bg-white/5 border border-white/5 flex items-center gap-3 animate-pulse">
+                    <div className="w-10 h-10 rounded-xl bg-white/10" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 w-3/4 bg-white/10 rounded" />
+                      <div className="h-2.5 w-1/2 bg-white/10 rounded" />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -222,42 +222,22 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     ? ECHO_TOP_ARTISTS.filter((a) => a.name.toLowerCase().includes(query.trim().toLowerCase()))
     : [];
 
-  /**
-   * Generates a randomized queue from search results.
-   * Keeps the selected track first so it starts immediately,
-   * while shuffling all remaining search results so playback advances randomly.
-   */
-  const createRandomQueueFromSearch = (selectedTrack: Track, allTracks: Track[]): Track[] => {
-    if (!allTracks || allTracks.length <= 1) {
-      return [selectedTrack];
-    }
-    const pool = allTracks.filter((t) => t.id !== selectedTrack.id);
-    const shuffled = [...pool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return [selectedTrack, ...shuffled];
-  };
-
   const handlePlayTrackFromSearch = (track: Track) => {
-    const randomQueue = createRandomQueueFromSearch(track, liveResults);
-    onPlayTrack(track, randomQueue);
+    // Play selected track directly; smart genre-aware autoplay will discover related tracks
+    onPlayTrack(track);
   };
 
   const handlePlayRandomAll = () => {
     if (liveResults.length === 0) return;
     const randomIndex = Math.floor(Math.random() * liveResults.length);
     const randomFirstTrack = liveResults[randomIndex];
-    const randomQueue = createRandomQueueFromSearch(randomFirstTrack, liveResults);
-    onPlayTrack(randomFirstTrack, randomQueue);
+    onPlayTrack(randomFirstTrack);
   };
 
   const handlePlayAllStandard = () => {
     if (liveResults.length === 0) return;
     const firstTrack = liveResults[0];
-    const randomQueue = createRandomQueueFromSearch(firstTrack, liveResults);
-    onPlayTrack(firstTrack, randomQueue);
+    onPlayTrack(firstTrack);
   };
 
   return (
